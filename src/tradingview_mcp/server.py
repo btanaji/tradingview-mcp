@@ -78,6 +78,19 @@ from tradingview_mcp.core.services.backtest_service import (
     compare_strategies as _compare_strategies,
     walk_forward_backtest,
 )
+from tradingview_mcp.core.services.custom_strategy_service import (
+    run_custom_backtest, optimize_custom_strategy as _optimize_custom_strategy,
+    list_available_strategies,
+)
+from tradingview_mcp.core.services.custom_strategy_service import (
+     list_ict_strategies as list_ict_strategies_impl, run_ict_backtest,
+)
+from tradingview_mcp.core.services.pine_strategy_service import (
+    list_pine_strategies as list_pine_strategies_impl,
+    validate_pine_strategy as _validate_pine_strategy,
+    run_pine_backtest,
+    optimize_pine_strategy as _optimize_pine_strategy,
+)
 from tradingview_mcp.core.utils.validators import (
     sanitize_timeframe,
     sanitize_exchange,
@@ -735,7 +748,248 @@ def walk_forward_backtest_strategy(
         symbol, strategy, period, initial_capital,
         commission_pct, slippage_pct, n_splits, train_ratio, interval,
     )
+@mcp.tool(annotations=ToolAnnotations(title="List Custom Strategies", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def list_custom_strategies() -> dict:
+    """List every .txt strategy file found in your strategies folder, with
+    the entry/SL/TP options each one declares.
 
+    Data comes from a running MT5 terminal (not Yahoo Finance) — MT5 must
+    be open and logged in. Strategies folder defaults to ~/Claude/strategies (override with the
+    TV_MCP_CUSTOM_STRATEGIES_DIR environment variable).
+    """
+    return list_available_strategies()
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Custom Strategy Backtest", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
+def backtest_custom_strategy(
+    strategy_name: str,
+    symbol: str = "",
+    entry: str = "",
+    sl: str = "",
+    tp: str = "",
+    period: str = "1y",
+    interval: str = "1d",
+    initial_capital: float = 10000.0,
+    commission_pct: float = 0.1,
+    slippage_pct: float = 0.05,
+) -> dict:
+    """Backtest one of your own .txt strategy files with one specific
+    entry/SL/TP combination, fetching OHLC directly from your running MT5
+    terminal, and returning the same metrics shape as the built-in
+    backtest_strategy tool.
+
+    Args:
+        strategy_name: filename without .txt (e.g. 'sd_cvd_flow')
+        symbol: MT5 broker symbol (e.g. XAUUSD); falls back to the file's SYMBOL_DEFAULT if omitted
+        entry: entry confirmation mode declared in the file; defaults to the file's first option
+        sl: stop-loss mode declared in the file; defaults to the file's first option
+        tp: take-profit mode declared in the file; defaults to the file's first option
+        period: '1mo', '3mo', '6mo', '1y', '2y'
+        interval: '1m', '5m', '15m', '30m', '1h', '4h', or '1d'
+        initial_capital: Starting capital in USD (default $10,000)
+        commission_pct: Per-trade commission % (default 0.1%)
+        slippage_pct: Per-trade slippage % (default 0.05%)
+    """
+    return run_custom_backtest(
+        strategy_name, symbol or None, entry or None, sl or None, tp or None,
+        period, interval, initial_capital, commission_pct, slippage_pct,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Custom Strategy Optimizer", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
+def optimize_custom_strategy(
+    strategy_name: str,
+    symbol: str = "",
+    period: str = "2y",
+    interval: str = "1d",
+    initial_capital: float = 10000.0,
+    commission_pct: float = 0.1,
+    slippage_pct: float = 0.05,
+    rank_by: str = "sharpe_ratio",
+    n_splits: int = 3,
+    train_ratio: float = 0.7,
+) -> dict:
+    """Sweep every entry/SL/TP combination declared in one of your .txt
+    strategy files and rank them. Walk-forward validation always runs
+    alongside the ranking — check 'walk_forward_verdict' on the top-ranked
+    row before trusting it; a high rank with an OVERFITTED verdict means it
+    only worked on this specific period, not a genuinely good combination.
+
+    Args:
+        strategy_name: filename without .txt (e.g. 'sd_cvd_flow')
+        symbol: MT5 broker symbol (e.g. XAUUSD); falls back to the file's SYMBOL_DEFAULT if omitted
+        period: '1mo', '3mo', '6mo', '1y', '2y' (recommend '2y' for meaningful walk-forward folds)
+        interval: '1m', '5m', '15m', '30m', '1h', '4h', or '1d'
+        initial_capital: Starting capital in USD (default $10,000)
+        commission_pct: Per-trade commission % (default 0.1%)
+        slippage_pct: Per-trade slippage % (default 0.05%)
+        rank_by: 'sharpe_ratio' | 'total_return_pct' | 'profit_factor' | 'calmar_ratio'
+        n_splits: Number of walk-forward folds (default 3)
+        train_ratio: Fraction of each fold used for training (default 0.7)
+    """
+    return _optimize_custom_strategy(
+        strategy_name, symbol or None, period, interval,
+        initial_capital, commission_pct, slippage_pct,
+        rank_by, n_splits, train_ratio,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(title="List Pine Strategies", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def list_pine_strategies() -> dict:
+    """List every .txt file under the Pine strategies folder
+    (TV_MCP_PINE_STRATEGIES_DIR, default ~/Claude/pine_strategies), each
+    pairing a Pine Script [SCRIPT] indicator block with plain-English
+    [Buy Condition]/[Sell Condition]/[TP]/[SL] rule blocks. Shows whether
+    each file currently parses clean or has outstanding issues — use
+    validate_pine_strategy for the full diagnostic detail on any file
+    flagged 'has_issues'.
+    """
+    return list_pine_strategies_impl()
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Validate Pine Strategy", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def validate_pine_strategy(strategy_name: str) -> dict:
+    """Parse and validate one Pine strategy file WITHOUT loading any CSV
+    data or running a backtest — a fast iterate loop for fixing a script.
+    pine_lite supports a constrained Pine Script subset (core ta.*/math.*
+    built-ins, single-expression user functions, ta.macd via
+    [m, sig, hist] = ta.macd(...)); anything outside that subset
+    (request.security, for/while, var/varip, arrays, native strategy.entry)
+    is reported here with the exact line and reason — every issue found in
+    one pass, not just the first.
+
+    Args:
+        strategy_name: filename without .txt, under ~/Claude/pine_strategies
+    """
+    return _validate_pine_strategy(strategy_name)
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Pine Strategy Backtest", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
+def backtest_pine_strategy(
+    strategy_name: str,
+    symbol: str = "",
+    period: str = "",
+    interval: str = "",
+    initial_capital: float = 10000.0,
+    commission_pct: float = 0.1,
+    slippage_pct: float = 0.05,
+) -> dict:
+    """Backtest one Pine-lite strategy file: transpiles its [SCRIPT] block
+    (a constrained Pine Script subset) and [Buy Condition]/[Sell Condition]/
+    [Buy Exit]/[Sell Exit]/[Trend Filter] rules into per-bar signals, then
+    simulates trades against local CSV data using the same cost/metrics
+    math as every other backtest tool here. Returns the same metrics shape
+    as backtest_custom_strategy. Never partially runs a script with any
+    unsupported construct — call validate_pine_strategy first if unsure.
+
+    Args:
+        strategy_name: filename without .txt, under ~/Claude/pine_strategies
+        symbol: falls back to the file's SYMBOL_DEFAULT if omitted
+        period: '1mo','3mo','6mo','1y','2y','all' — falls back to the file's PERIOD, then '1y'
+        interval: '1m','5m','15m','30m','1h','4h','1d' — falls back to the file's INTERVAL, then '1h'
+        initial_capital: Starting capital in USD (default $10,000)
+        commission_pct: Per-trade commission % (default 0.1%)
+        slippage_pct: Per-trade slippage % (default 0.05%)
+    """
+    return run_pine_backtest(
+        strategy_name, symbol or None, period or None, interval or None,
+        initial_capital, commission_pct, slippage_pct,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Pine Strategy Optimizer", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
+def optimize_pine_strategy(
+    strategy_name: str,
+    symbol: str = "",
+    period: str = "",
+    interval: str = "",
+    initial_capital: float = 10000.0,
+    commission_pct: float = 0.1,
+    slippage_pct: float = 0.05,
+    rank_by: str = "sharpe_ratio",
+    n_splits: int = 3,
+    train_ratio: float = 0.7,
+    max_combos: int = 40,
+) -> dict:
+    """Sweep an SL/TP mode*value grid for one Pine-lite strategy file and
+    rank by `rank_by`. Unlike optimize_custom_strategy, Pine-lite files
+    don't declare an [OPTIONS] list of entry/SL/TP choices — there's just
+    one [SL]/[TP] mode+value — so this sweeps a grid seeded from the file's
+    OWN declared values (0.5x-2x) plus every SL/TP mode, including
+    signal_reversal for TP, rather than an exhaustive/arbitrary search.
+    Walk-forward validation always runs alongside the ranking — check
+    'walk_forward_verdict' on the top-ranked row before trusting it.
+
+    Args:
+        strategy_name: filename without .txt, under ~/Claude/pine_strategies
+        symbol: falls back to the file's SYMBOL_DEFAULT if omitted
+        period: falls back to the file's PERIOD, then '1y'
+        interval: falls back to the file's INTERVAL, then '1h'
+        initial_capital: Starting capital in USD (default $10,000)
+        commission_pct: Per-trade commission % (default 0.1%)
+        slippage_pct: Per-trade slippage % (default 0.05%)
+        rank_by: 'sharpe_ratio' | 'total_return_pct' | 'profit_factor' | 'calmar_ratio'
+        n_splits: Number of walk-forward folds (default 3)
+        train_ratio: Fraction of each fold used for training (default 0.7)
+        max_combos: Cap on SL*TP combinations tested (default 40)
+    """
+    return _optimize_pine_strategy(
+        strategy_name, symbol or None, period or None, interval or None,
+        initial_capital, commission_pct, slippage_pct,
+        rank_by, n_splits, train_ratio, max_combos,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(title="List ICT Strategies", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def list_ict_strategies() -> dict:
+    """List every .txt strategy file in your strategies folder, showing
+    which ones have dedicated hand-implemented ICT detection logic
+    (has_ict_logic: true) vs. only the generic supply/demand proxy engine.
+    """
+    return list_ict_strategies_impl()
+
+
+@mcp.tool(annotations=ToolAnnotations(title="ICT Strategy Backtest", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
+def backtest_ict_strategy(
+    strategy_name: str,
+    symbol: str = "",
+    entry: str = "",
+    sl: str = "",
+    tp: str = "",
+    period: str = "3mo",
+    ltf_interval: str = "",
+    htf_interval: str = "",
+    broker_utc_offset_hours: float = 0.0,
+    initial_capital: float = 10000.0,
+    commission_pct: float = 0.1,
+    slippage_pct: float = 0.05,
+) -> dict:
+    """Backtest one of the 18 ICT-rulebook strategies (Liq_Sweep_Reversal,
+    OB_Continuation, FVG_Rebalance, Killzone_Intraday, Silver_Bullet,
+    Breaker_Block_Reversal, Mitigation_Block, BPR_FVG_Overlap, IPDA_Arrays,
+    Daily_Bias_PDHPDL, OTE_Fib_Entry, and their session/confluence
+    variations) using each file's own hand-implemented detection logic
+    (fractals, FVGs, order blocks, sessions, etc.) rather than the generic
+    zone proxy. Fetches both HTF and LTF candles from your running MT5
+    terminal.
+
+    Args:
+        strategy_name: the file's NAME field or filename (e.g. 'Liq_Sweep_Reversal')
+        symbol: MT5 broker symbol; falls back to the file's SYMBOL_DEFAULT if omitted
+        entry/sl/tp: mode declared in the file; defaults to the file's first option
+        period: '1mo', '3mo', '6mo', '1y', '2y'
+        ltf_interval / htf_interval: override the file's own TIMEFRAMES tokens if set;
+            otherwise the first TIMEFRAMES token is used as HTF, the last as LTF
+        broker_utc_offset_hours: your MT5 broker's server-time offset from UTC
+            (needed for session-window strategies like Killzone_Intraday /
+            Silver_Bullet — check your broker's specs; commonly +2 or +3 for EET)
+        initial_capital, commission_pct, slippage_pct: same as backtest_custom_strategy
+    """
+    return run_ict_backtest(
+        strategy_name, symbol or None, entry or None, sl or None, tp or None,
+        period, ltf_interval or None, htf_interval or None,
+        broker_utc_offset_hours, initial_capital, commission_pct, slippage_pct,
+    )
 
 # ── Yahoo Finance tools ────────────────────────────────────────────────────────
 
