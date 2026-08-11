@@ -1,7 +1,13 @@
 import sqlite3
 import os
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
+
+from tradingview_mcp.core.services.risk_service import (
+    calc_position_size,
+    check_exposure_limits,
+    check_circuit_breaker,
+)
 
 # Store the DB in the user's home directory or current directory
 DB_DIR = os.path.expanduser("~/.tradingview_mcp_data")
@@ -72,23 +78,175 @@ def get_or_create_user(user_id: str, initial_balance: float = 10000.0) -> float:
     conn.close()
     return balance
 
-def execute_trade(user_id: str, symbol: str, quantity: float, current_price: float, side: str) -> Dict[str, Any]:
-    """Execute a simulated trade (BUY or SELL) for a user."""
+def _get_open_positions(user_id: str) -> List[Dict[str, Any]]:
+    """Open positions valued at their average entry price (no live-price feed
+    is wired into this module — callers with fresher marks should override
+    the traded symbol's notional themselves before calling risk checks)."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT symbol, quantity, average_price FROM positions WHERE user_id = ?", (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"symbol": s, "quantity": q, "average_price": p, "notional": q * p} for s, q, p in rows]
+
+
+def _get_equity(user_id: str, balance: float) -> float:
+    """Cash + mark-to-average-price value of open positions."""
+    return balance + sum(p["notional"] for p in _get_open_positions(user_id))
+
+
+def _get_consecutive_losses(user_id: str) -> int:
+    """Count consecutive losing SELLs (realized_pnl < 0) working back from the
+    most recent closed trade, stopping at the first winner."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT realized_pnl FROM trade_history WHERE user_id = ? AND side = 'SELL' "
+        "ORDER BY executed_at DESC, id DESC",
+        (user_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    streak = 0
+    for (pnl,) in rows:
+        if pnl < 0:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def _get_daily_pnl_pct(user_id: str, equity: float) -> float:
+    """Today's realized P&L (UTC calendar day) as % of current equity."""
+    if equity <= 0:
+        return 0.0
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COALESCE(SUM(realized_pnl), 0) FROM trade_history "
+        "WHERE user_id = ? AND side = 'SELL' AND date(executed_at) = ?",
+        (user_id, today),
+    )
+    realized_today = cursor.fetchone()[0]
+    conn.close()
+    return round(realized_today / equity * 100, 4)
+
+
+def check_pretrade_risk(
+    user_id: str,
+    symbol: str,
+    notional: float,
+    max_single_symbol_pct: Optional[float] = None,
+    max_total_exposure_pct: Optional[float] = None,
+    max_daily_loss_pct: Optional[float] = None,
+    max_consecutive_losses: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Run exposure and circuit-breaker checks before a BUY. Any limit left
+    as None is skipped. Returns {"allowed": bool, "reasons": [...]} plus the
+    underlying risk_service payloads for inspection."""
+    balance = get_or_create_user(user_id)
+    equity = _get_equity(user_id, balance)
+    reasons: List[str] = []
+
+    exposure_result = None
+    if max_single_symbol_pct is not None or max_total_exposure_pct is not None:
+        exposure_result = check_exposure_limits(
+            _get_open_positions(user_id), notional, symbol.upper(), equity,
+            max_single_symbol_pct if max_single_symbol_pct is not None else 20.0,
+            max_total_exposure_pct if max_total_exposure_pct is not None else 100.0,
+        )
+        if "error" in exposure_result:
+            return exposure_result
+        if not exposure_result["allowed"]:
+            reasons.extend(exposure_result["breaches"])
+
+    breaker_result = None
+    if max_daily_loss_pct is not None or max_consecutive_losses is not None:
+        breaker_result = check_circuit_breaker(
+            _get_daily_pnl_pct(user_id, equity),
+            _get_consecutive_losses(user_id),
+            max_daily_loss_pct if max_daily_loss_pct is not None else 3.0,
+            max_consecutive_losses if max_consecutive_losses is not None else 5,
+        )
+        if breaker_result["halt_trading"]:
+            reasons.extend(breaker_result["triggers"])
+
+    return {
+        "allowed": len(reasons) == 0,
+        "reasons": reasons,
+        "equity": round(equity, 2),
+        "exposure_check": exposure_result,
+        "circuit_breaker_check": breaker_result,
+    }
+
+
+def execute_trade(
+    user_id: str,
+    symbol: str,
+    quantity: float,
+    current_price: float,
+    side: str,
+    risk_pct: Optional[float] = None,
+    stop_price: Optional[float] = None,
+    max_single_symbol_pct: Optional[float] = None,
+    max_total_exposure_pct: Optional[float] = None,
+    max_daily_loss_pct: Optional[float] = None,
+    max_consecutive_losses: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Execute a simulated trade (BUY or SELL) for a user.
+
+    Optional risk controls (all skipped unless passed, so existing callers
+    are unaffected):
+      - risk_pct + stop_price: on a BUY, `quantity` is ignored and instead
+        computed via risk_service.calc_position_size so the stop risks
+        exactly risk_pct of equity.
+      - max_single_symbol_pct / max_total_exposure_pct: reject the BUY if it
+        would breach per-symbol or total exposure caps.
+      - max_daily_loss_pct / max_consecutive_losses: reject the BUY if the
+        account's circuit breaker is currently tripped.
+    Risk checks only gate new BUYs — closing a position via SELL is never
+    blocked.
+    """
     symbol = symbol.upper()
     side = side.upper()
-    
+
     if side not in ['BUY', 'SELL']:
         return {"error": "Side must be 'BUY' or 'SELL'"}
-        
-    if quantity <= 0:
-        return {"error": "Quantity must be greater than 0"}
 
     # Initialize user if they don't exist
     balance = get_or_create_user(user_id)
-    
+
+    if side == 'BUY':
+        if risk_pct is not None and stop_price is not None:
+            equity = _get_equity(user_id, balance)
+            sizing = calc_position_size(equity, risk_pct, current_price, stop_price)
+            if "error" in sizing:
+                return sizing
+            quantity = sizing["quantity"]
+
+        if quantity <= 0:
+            return {"error": "Quantity must be greater than 0"}
+
+        if any(v is not None for v in (
+            max_single_symbol_pct, max_total_exposure_pct,
+            max_daily_loss_pct, max_consecutive_losses,
+        )):
+            risk_check = check_pretrade_risk(
+                user_id, symbol, quantity * current_price,
+                max_single_symbol_pct, max_total_exposure_pct,
+                max_daily_loss_pct, max_consecutive_losses,
+            )
+            if "error" in risk_check:
+                return risk_check
+            if not risk_check["allowed"]:
+                return {"error": "Trade rejected by risk checks", "reasons": risk_check["reasons"]}
+    elif quantity <= 0:
+        return {"error": "Quantity must be greater than 0"}
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
+
     try:
         if side == 'BUY':
             cost = quantity * current_price

@@ -40,6 +40,25 @@ dependencies = [
   "tradingview-ta>=3.3.0",
 ]
 
+[project.optional-dependencies]
+# Only calculate_option_greeks needs this — everything else in risk_service.py
+# (position sizing, VaR, exposure/circuit-breaker checks) is pure stdlib and
+# works without it. Kept optional since it's a ~13MB compiled wheel.
+risk = ["QuantLib>=1.35"]
+# run_alpha_factor_analysis tries this first and falls back to a pure-stdlib
+# logistic regression if it's missing OR if the compiled lib_lightgbm.dll
+# fails to load (observed on Windows without its MSVC runtime — install
+# succeeds, import succeeds, only constructing a Booster fails; see
+# ml_factor_service.py's module docstring).
+ml = ["lightgbm>=4.0"]
+# gymnasium is required (the env itself); stable-baselines3 is optional on
+# top of it — train_rl_trading_agent tries PPO first and falls back to a
+# pure-stdlib Q-learning agent if stable-baselines3 (and its torch
+# dependency) isn't installed. Not installed by default here: a
+# multi-hundred-MB dependency chain not worth forcing on every install.
+rl = ["gymnasium>=1.0", "numpy>=1.24"]
+rl-full = ["gymnasium>=1.0", "numpy>=1.24", "stable-baselines3>=2.0"]
+
 [project.scripts]
 # Entry point now points to packaged module
 tradingview-mcp = "tradingview_mcp.server:main"

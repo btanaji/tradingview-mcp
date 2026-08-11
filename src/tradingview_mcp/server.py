@@ -78,6 +78,52 @@ from tradingview_mcp.core.services.backtest_service import (
     compare_strategies as _compare_strategies,
     walk_forward_backtest,
 )
+<<<<<<< Updated upstream
+=======
+from tradingview_mcp.core.services.custom_strategy_service import (
+    run_custom_backtest, optimize_custom_strategy as _optimize_custom_strategy,
+    list_available_strategies,
+)
+from tradingview_mcp.core.services.custom_strategy_service import (
+     list_ict_strategies as list_ict_strategies_impl, run_ict_backtest,
+)
+from tradingview_mcp.core.services.pine_strategy_service import (
+    list_pine_strategies as list_pine_strategies_impl,
+    validate_pine_strategy as _validate_pine_strategy,
+    run_pine_backtest,
+    optimize_pine_strategy as _optimize_pine_strategy,
+)
+from tradingview_mcp.core.services.risk_service import (
+    calc_position_size,
+    calc_var,
+    check_exposure_limits,
+    check_circuit_breaker,
+    calc_option_greeks,
+)
+from tradingview_mcp.core.portfolio import (
+    execute_trade as _execute_paper_trade,
+    get_portfolio as _get_paper_portfolio,
+    check_pretrade_risk as _check_pretrade_risk,
+)
+from tradingview_mcp.core.services.live_signal_service import (
+    evaluate_live_signal as _evaluate_live_signal,
+    scan_watchlist as _scan_watchlist,
+)
+from tradingview_mcp.core.services.alerting_service import (
+    send_telegram_alert as _send_telegram_alert,
+)
+from tradingview_mcp.core.services.data_providers import (
+    get_ohlcv as _get_ohlcv,
+    get_fred_series as _get_fred_series,
+    get_company_fundamentals as _get_company_fundamentals,
+)
+from tradingview_mcp.core.services.ml_factor_service import (
+    run_alpha_factor_analysis as _run_alpha_factor_analysis,
+)
+from tradingview_mcp.core.services.rl_service import (
+    train_rl_trading_agent as _train_rl_trading_agent,
+)
+>>>>>>> Stashed changes
 from tradingview_mcp.core.utils.validators import (
     sanitize_timeframe,
     sanitize_exchange,
@@ -737,6 +783,131 @@ def walk_forward_backtest_strategy(
     )
 
 
+# ── Risk management tools ──────────────────────────────────────────────────────
+
+@mcp.tool(annotations=ToolAnnotations(title="Position Size Calculator", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def calculate_position_size(
+    account_equity: float,
+    risk_pct: float,
+    entry_price: float,
+    stop_price: float,
+    contract_size: float = 1.0,
+    max_position_pct: float = 100.0,
+) -> dict:
+    """Size a position so a stop-out risks exactly `risk_pct` of account equity,
+    the fractional/risk-based sizing none of the backtest engines do internally
+    (they compound equity by raw % price move, not by capital actually risked).
+
+    Args:
+        account_equity: current account/portfolio equity in account currency.
+        risk_pct: % of equity to risk if the stop is hit (e.g. 1.0 = risk 1%).
+        entry_price/stop_price: planned entry and stop-loss price, same units.
+        contract_size: units per 1.0 quantity (1.0 for shares/coins; the lot's
+            unit size for FX/futures contracts).
+        max_position_pct: hard cap on notional as % of equity, applied even if
+            the stop is close enough that risk-based sizing would exceed it.
+    """
+    return calc_position_size(account_equity, risk_pct, entry_price, stop_price,
+                               contract_size, max_position_pct)
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Portfolio Value at Risk", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def calculate_portfolio_var(
+    returns_pct: list[float],
+    confidence: float = 95.0,
+    method: str = "historical",
+    capital: float = 0.0,
+) -> dict:
+    """Value at Risk (and CVaR/Expected Shortfall) from a series of per-period
+    % returns — feed it trade returns from a backtest's trade_log or daily
+    equity-curve returns.
+
+    Args:
+        returns_pct: per-period returns in percent, e.g. [-1.2, 0.8, 2.1, ...].
+        confidence: confidence level, e.g. 95 or 99.
+        method: 'historical' (empirical percentile) or 'parametric' (Gaussian).
+        capital: if > 0, also expresses VaR/CVaR in currency.
+    """
+    return calc_var(returns_pct, confidence, method, capital or None)
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Exposure Limit Check", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def check_risk_limits(
+    open_positions: list[dict],
+    new_position_notional: float,
+    new_position_symbol: str,
+    account_equity: float,
+    max_single_symbol_pct: float = 20.0,
+    max_total_exposure_pct: float = 100.0,
+) -> dict:
+    """Check whether adding a new position would breach per-symbol or total
+    exposure caps before it's sent to execution.
+
+    Args:
+        open_positions: list of {"symbol": str, "notional": float}.
+        new_position_notional: notional of the proposed new position.
+        new_position_symbol: symbol of the proposed new position.
+        account_equity: current equity, used as the denominator for both caps.
+        max_single_symbol_pct: cap on any one symbol's total notional / equity.
+        max_total_exposure_pct: cap on total notional across positions / equity.
+    """
+    return check_exposure_limits(open_positions, new_position_notional,
+                                  new_position_symbol, account_equity,
+                                  max_single_symbol_pct, max_total_exposure_pct)
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Circuit Breaker Check", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def check_circuit_breaker_status(
+    daily_pnl_pct: float,
+    consecutive_losses: int = 0,
+    max_daily_loss_pct: float = 3.0,
+    max_consecutive_losses: int = 5,
+    max_drawdown_pct: float = 0.0,
+    current_drawdown_pct: float = 0.0,
+) -> dict:
+    """Should live/paper trading halt right now? Checks daily loss limit,
+    consecutive-loss streak, and optional drawdown ceiling.
+
+    Args:
+        daily_pnl_pct: today's P&L as % of starting equity (negative = loss).
+        consecutive_losses: count of consecutive losing trades today.
+        max_daily_loss_pct: halt if daily loss exceeds this (positive number).
+        max_consecutive_losses: halt after this many consecutive losers.
+        max_drawdown_pct: optional hard drawdown ceiling from peak equity
+            (0 disables this check).
+        current_drawdown_pct: current drawdown from peak equity (positive number).
+    """
+    return check_circuit_breaker(daily_pnl_pct, consecutive_losses, max_daily_loss_pct,
+                                  max_consecutive_losses, max_drawdown_pct or None,
+                                  current_drawdown_pct)
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Option Greeks Calculator", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def calculate_option_greeks(
+    spot: float,
+    strike: float,
+    volatility_pct: float,
+    expiry_days: int,
+    risk_free_rate_pct: float = 0.0,
+    dividend_yield_pct: float = 0.0,
+    option_type: str = "call",
+) -> dict:
+    """European option price + Greeks (delta/gamma/theta/vega/rho) via
+    QuantLib's Black-Scholes-Merton engine. Requires QuantLib installed
+    (pip install QuantLib); returns a DEPENDENCY_MISSING error envelope
+    if it isn't.
+
+    Args:
+        spot/strike: underlying price and option strike.
+        volatility_pct: annualized implied volatility, e.g. 25.0 for 25%.
+        expiry_days: calendar days to expiry.
+        risk_free_rate_pct: annualized risk-free rate, e.g. 4.5 for 4.5%.
+        dividend_yield_pct: annualized dividend yield, e.g. 1.5 for 1.5%.
+        option_type: 'call' or 'put'.
+    """
+    return calc_option_greeks(spot, strike, volatility_pct, expiry_days,
+                               risk_free_rate_pct, dividend_yield_pct, option_type)
+
 # ── Yahoo Finance tools ────────────────────────────────────────────────────────
 
 @mcp.tool(annotations=ToolAnnotations(title="Real-Time Price Quote", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
@@ -1029,6 +1200,353 @@ async def stock_prices(tickers: str) -> dict:
     except Exception as e:
         return make_error(ErrorCode.UPSTREAM_ERROR, f"price lookup failed: {e}")
 
+
+# ── Paper trading / portfolio tools ────────────────────────────────────────────
+#
+# SQLite-backed simulated portfolio (core/portfolio.py) — no real money or
+# broker connection involved. `execute_paper_trade` is the first stateful
+# tool in this server; it is the only place risk_service's exposure and
+# circuit-breaker checks are actually enforced (as opposed to just computed
+# and reported back).
+
+@mcp.tool(annotations=ToolAnnotations(title="Execute Paper Trade", readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
+def execute_paper_trade(
+    user_id: str,
+    symbol: str,
+    side: str,
+    quantity: float = 0.0,
+    current_price: float = 0.0,
+    risk_pct: float = 0.0,
+    stop_price: float = 0.0,
+    max_single_symbol_pct: float = 0.0,
+    max_total_exposure_pct: float = 0.0,
+    max_daily_loss_pct: float = 0.0,
+    max_consecutive_losses: int = 0,
+) -> dict:
+    """Execute a simulated BUY/SELL against a per-user SQLite paper portfolio
+    (starts each new user_id at $10,000 cash). No real broker or funds are
+    involved — this is for testing strategies/risk rules end-to-end before
+    any live wiring exists.
+
+    Args:
+        user_id: arbitrary identifier — a new one is created with $10,000 on first use.
+        symbol: instrument symbol (stored uppercased; not validated against any exchange).
+        side: 'BUY' or 'SELL'.
+        quantity: units to trade. Ignored on a BUY if risk_pct and stop_price are both set
+            (quantity is computed instead). Required (> 0) for SELL and for a BUY without
+            risk-based sizing.
+        current_price: execution price for this trade.
+        risk_pct: if set with stop_price, size the BUY so a stop-out risks exactly this %
+            of current equity (cash + open positions marked at average price).
+        stop_price: planned stop-loss price, used only for risk_pct sizing.
+        max_single_symbol_pct / max_total_exposure_pct: if set (> 0), reject the BUY if it
+            would push that symbol's or the whole portfolio's notional past this % of equity.
+        max_daily_loss_pct / max_consecutive_losses: if set (> 0), reject the BUY if today's
+            realized loss or the current losing-trade streak has already tripped this limit.
+        Risk checks (all optional, 0 = skip) only ever gate new BUYs — closing a position
+        via SELL always goes through.
+    """
+    return _execute_paper_trade(
+        user_id, symbol, quantity, current_price, side,
+        risk_pct=risk_pct or None,
+        stop_price=stop_price or None,
+        max_single_symbol_pct=max_single_symbol_pct or None,
+        max_total_exposure_pct=max_total_exposure_pct or None,
+        max_daily_loss_pct=max_daily_loss_pct or None,
+        max_consecutive_losses=max_consecutive_losses or None,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(title="View Paper Portfolio", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def get_paper_portfolio(user_id: str) -> dict:
+    """View a paper-trading user's current cash balance and open positions
+    (symbol, quantity, average entry price). Creates the user with $10,000
+    cash on first call if they don't exist yet.
+    """
+    return _get_paper_portfolio(user_id)
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Pre-Trade Risk Check", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def check_paper_trade_risk(
+    user_id: str,
+    symbol: str,
+    notional: float,
+    max_single_symbol_pct: float = 0.0,
+    max_total_exposure_pct: float = 0.0,
+    max_daily_loss_pct: float = 0.0,
+    max_consecutive_losses: int = 0,
+) -> dict:
+    """Dry-run exposure and circuit-breaker checks against a paper-trading
+    user's current state, without placing any trade — use this to preview
+    whether execute_paper_trade would allow a BUY before sending it.
+
+    Args:
+        user_id: the paper-trading user to check against.
+        symbol: instrument symbol for the proposed new position.
+        notional: proposed new position's notional value (quantity * price).
+        max_single_symbol_pct / max_total_exposure_pct: exposure caps to check (0 = skip).
+        max_daily_loss_pct / max_consecutive_losses: circuit-breaker limits to check (0 = skip).
+    """
+    return _check_pretrade_risk(
+        user_id, symbol, notional,
+        max_single_symbol_pct or None,
+        max_total_exposure_pct or None,
+        max_daily_loss_pct or None,
+        max_consecutive_losses or None,
+    )
+
+# ── Live signal evaluator ───────────────────────────────────────────────────────
+#
+# Reuses the same run_ict_backtest/run_custom_backtest/run_pine_backtest code
+# paths (no duplicated detection logic) over a short trailing window to check
+# whether a fresh entry signal exists on the latest available bar of local
+# CSV data. There is no live broker/network feed in this codebase — "live"
+# here means "as fresh as whatever is on disk." Intended to be invoked on a
+# schedule by an external process (cron/APScheduler), not per-tick by an LLM.
+
+@mcp.tool(annotations=ToolAnnotations(title="Evaluate Live Signal", readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+def evaluate_live_signal(
+    engine: str,
+    strategy_name: str,
+    symbol: str = "",
+    period: str = "1mo",
+    atr_period: int = 14,
+    atr_stop_multiplier: float = 1.5,
+    interval: str = "",
+    ltf_interval: str = "",
+    htf_interval: str = "",
+    broker_utc_offset_hours: float = 0.0,
+) -> dict:
+    """Check whether a strategy has a fresh entry signal on the most recent
+    bar of local CSV data, by running the matching backtest engine over a
+    short window and checking if its most recent trade opened on the latest
+    bar. Also returns a fallback ATR-based stop suggestion — NOT the
+    strategy's own internal SL (no engine's trade log exposes that).
+
+    Args:
+        engine: 'ict' (ict_strategies registry), 'custom' (generic
+            swing-pivot proxy engine), or 'pine' (pine_lite).
+        strategy_name: the strategy file's NAME field or filename.
+        symbol: overrides the file's SYMBOL_DEFAULT if given.
+        period: trailing window for the underlying backtest (e.g. '1mo', '3mo').
+        atr_period / atr_stop_multiplier: fallback stop-loss sizing on a fresh signal.
+        interval: candle interval — used by 'custom'/'pine' engines only.
+        ltf_interval / htf_interval / broker_utc_offset_hours: used by the 'ict' engine only.
+    """
+    kwargs: dict = {}
+    if engine == "ict":
+        if ltf_interval:
+            kwargs["ltf_interval"] = ltf_interval
+        if htf_interval:
+            kwargs["htf_interval"] = htf_interval
+        if broker_utc_offset_hours:
+            kwargs["broker_utc_offset_hours"] = broker_utc_offset_hours
+    elif interval:
+        kwargs["interval"] = interval
+    return _evaluate_live_signal(
+        engine, strategy_name, symbol or None, period,
+        atr_period, atr_stop_multiplier, **kwargs,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Scan Watchlist For Signals", readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
+def scan_watchlist(
+    watchlist: list[dict],
+    user_id: str = "",
+    auto_paper_trade: bool = False,
+    risk_pct: float = 1.0,
+    max_single_symbol_pct: float = 0.0,
+    max_total_exposure_pct: float = 0.0,
+    max_daily_loss_pct: float = 0.0,
+    max_consecutive_losses: int = 0,
+    send_telegram_alerts: bool = False,
+) -> dict:
+    """Scan multiple strategy/symbol pairs for fresh signals in one call —
+    meant to be invoked on a schedule by an external process (cron/
+    APScheduler), keeping the LLM out of the per-tick execution loop.
+
+    Args:
+        watchlist: list of dicts, each at minimum
+            {"engine": "ict"|"custom"|"pine", "strategy_name": "..."}, plus
+            optional "symbol"/"period"/"interval"/"ltf_interval"/
+            "htf_interval"/"broker_utc_offset_hours" per evaluate_live_signal.
+        user_id: paper-trading user to execute against; required if auto_paper_trade is True.
+        auto_paper_trade: if True, auto-BUYs every fresh LONG signal via the paper
+            portfolio, sized by risk_pct against the suggested ATR stop. Short
+            signals are always reported, never auto-traded (no short-selling
+            support in the paper portfolio).
+        risk_pct: % of paper-portfolio equity to risk per auto-trade.
+        max_single_symbol_pct / max_total_exposure_pct / max_daily_loss_pct /
+            max_consecutive_losses: risk limits applied to each auto-trade (0 = skip).
+        send_telegram_alerts: if True, sends one Telegram message per fresh signal
+            (requires TV_MCP_TELEGRAM_BOT_TOKEN / TV_MCP_TELEGRAM_CHAT_ID env vars).
+    """
+    return _scan_watchlist(
+        watchlist, user_id or None, auto_paper_trade, risk_pct,
+        max_single_symbol_pct or None, max_total_exposure_pct or None,
+        max_daily_loss_pct or None, max_consecutive_losses or None,
+        send_telegram_alerts,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Send Telegram Alert", readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True))
+def send_telegram_alert(text: str, bot_token: str = "", chat_id: str = "") -> dict:
+    """Send a Telegram message via the Bot API — mainly for testing your
+    TV_MCP_TELEGRAM_BOT_TOKEN / TV_MCP_TELEGRAM_CHAT_ID setup before relying
+    on scan_watchlist's automatic alerts.
+
+    Args:
+        text: message body (Markdown formatting supported).
+        bot_token / chat_id: override the TV_MCP_TELEGRAM_BOT_TOKEN /
+            TV_MCP_TELEGRAM_CHAT_ID env vars for this call.
+    """
+    return _send_telegram_alert(text, bot_token or None, chat_id or None)
+
+# ── Data abstraction layer ──────────────────────────────────────────────────────
+#
+# OpenBB-pattern unified provider abstraction, free-provider substitution
+# per CLAUDE.md's plan (see core/services/data_providers/__init__.py for the
+# full substitution table). get_ohlcv routes to the existing CSV/Yahoo
+# fetchers; FRED and SEC EDGAR are genuinely new free official sources.
+
+@mcp.tool(annotations=ToolAnnotations(title="Unified OHLCV Fetch", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
+def get_ohlcv(
+    symbol: str,
+    source: str,
+    period: str = "3mo",
+    interval: str = "1d",
+) -> dict:
+    """Fetch OHLCV candles from either backing data source through one call.
+
+    Args:
+        symbol: instrument symbol. For source='csv': a local MT5-exported
+            file under TV_MCP_CSV_DATA_DIR (FX/metals, e.g. 'XAUUSD'). For
+            source='yahoo': a Yahoo Finance ticker (equities/crypto/indices,
+            e.g. 'AAPL', 'BTC-USD').
+        source: 'csv' (local files) or 'yahoo' (Yahoo Finance chart API).
+        period: trailing window, e.g. '1mo'/'3mo'/'6mo'/'1y'/'2y' (csv also
+            accepts '3y'/'4y'/'5y'/'all').
+        interval: candle interval, e.g. '1d'/'1h' (csv also accepts
+            '1m'/'5m'/'15m'/'30m'/'4h').
+    """
+    return _get_ohlcv(symbol, source, period, interval)
+
+
+@mcp.tool(annotations=ToolAnnotations(title="FRED Macro Series", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
+def get_macro_series(
+    series_id: str,
+    start_date: str = "",
+    end_date: str = "",
+    limit: int = 1000,
+) -> dict:
+    """Fetch a macroeconomic time series from FRED (St. Louis Fed) — free,
+    official, no substitute needed. Requires FRED_API_KEY env var (free
+    signup at https://fred.stlouisfed.org/docs/api/api_key.html).
+
+    Args:
+        series_id: FRED series ID, e.g. 'GDP', 'CPIAUCSL' (CPI), 'DFF' (fed
+            funds rate), 'UNRATE' (unemployment), 'DGS10' (10y treasury yield).
+        start_date / end_date: 'YYYY-MM-DD', optional (defaults to full history).
+        limit: max observations returned (default/cap 1000 — narrow the date
+            range instead of raising this for long series).
+    """
+    return _get_fred_series(series_id, start_date or None, end_date or None, limit=limit)
+
+
+@mcp.tool(annotations=ToolAnnotations(title="SEC EDGAR Company Fundamentals", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
+def get_company_fundamentals(ticker: str, concept: str = "Revenues") -> dict:
+    """Fetch one XBRL us-gaap concept's full reported history for a
+    US-listed company from SEC EDGAR — free, official, no paid tier, no
+    substitute needed. Requires SEC_EDGAR_USER_AGENT env var set to a
+    descriptive identifier (e.g. 'Your Name your@email.com') per SEC's
+    fair-use policy.
+
+    Args:
+        ticker: stock ticker, e.g. 'AAPL'.
+        concept: an XBRL us-gaap taxonomy tag, e.g. 'Revenues' (default),
+            'Assets', 'NetIncomeLoss', 'EarningsPerShareBasic',
+            'StockholdersEquity'. Browse a company's actual filings at
+            https://www.sec.gov/cgi-bin/browse-edgar to find tags it reports.
+    """
+    return _get_company_fundamentals(ticker, concept)
+
+# ── ML alpha-factor research ────────────────────────────────────────────────────
+#
+# Qlib-style Data Handler -> Feature Engineering -> Model -> Analysis
+# workflow (research layer only — not wired into any backtest engine's
+# entries/exits). Features reuse indicators_calc.py; model is LightGBM if
+# it actually loads in this environment, else a pure-stdlib logistic
+# regression fallback — see ml_factor_service.py's module docstring.
+
+@mcp.tool(annotations=ToolAnnotations(title="ML Alpha Factor Analysis", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
+def run_alpha_factor_analysis(
+    symbol: str,
+    source: str = "yahoo",
+    period: str = "2y",
+    interval: str = "1d",
+    horizon: int = 5,
+    train_frac: float = 0.7,
+    model: str = "auto",
+) -> dict:
+    """Train a directional alpha model on engineered technical factors
+    (RSI/MACD/Bollinger %B/ATR%/EMA distance/lagged returns/volatility) and
+    report its out-of-sample predictive skill: hit rate vs. baseline and
+    Information Coefficient (Spearman correlation between predicted score
+    and realized forward return). Research-layer output only — not wired
+    into any backtest engine's entries/exits.
+
+    Args:
+        symbol: instrument symbol (see get_ohlcv for source-specific format).
+        source: 'csv' (local MT5-exported files) or 'yahoo' (Yahoo Finance).
+        period / interval: how much history to fetch and at what granularity
+            (e.g. period='2y', interval='1d' — need enough bars for a
+            meaningful train/test split; more history is better here).
+        horizon: bars ahead the label predicts (forward % return).
+        train_frac: fraction of bars (chronological split, not shuffled)
+            used for training; the rest is held out as the test set.
+        model: 'lightgbm' (falls back to logistic if the compiled library
+            fails to load — common on Windows without its MSVC runtime),
+            'logistic' (pure stdlib, always available), or 'auto' (try
+            lightgbm, silently fall back).
+    """
+    return _run_alpha_factor_analysis(symbol, source, period, interval, horizon, train_frac, model)
+
+
+# ── RL trading agent (FinRL-inspired) ───────────────────────────────────────────
+#
+# Lowest-priority, purely additive strategy source per CLAUDE.md's build
+# order. Wraps the same feature pipeline as run_alpha_factor_analysis into a
+# long/flat Gymnasium environment (no shorting — matches the paper
+# portfolio). PPO via Stable-Baselines3 if installed and it actually trains,
+# else a pure-stdlib tabular Q-learning fallback — see rl_service.py.
+
+@mcp.tool(annotations=ToolAnnotations(title="Train RL Trading Agent", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
+def train_rl_trading_agent(
+    symbol: str,
+    source: str = "yahoo",
+    period: str = "2y",
+    interval: str = "1d",
+    train_frac: float = 0.7,
+    episodes: int = 200,
+    algo: str = "auto",
+) -> dict:
+    """Train a long/flat RL trading agent on engineered technical features
+    and evaluate it out-of-sample against buy-and-hold. Research-layer
+    output only — not wired into any backtest engine's entries/exits.
+
+    Args:
+        symbol: instrument symbol (see get_ohlcv for source-specific format).
+        source: 'csv' (local MT5-exported files) or 'yahoo' (Yahoo Finance).
+        period / interval: how much history to fetch and at what granularity.
+        train_frac: fraction of bars (chronological, not shuffled) used for
+            training; the rest is the out-of-sample evaluation window.
+        episodes: training passes over the data (Q-learning) or a timesteps
+            multiplier (PPO: episodes * n_train_bars timesteps).
+        algo: 'ppo' (Stable-Baselines3; falls back to qlearning if not
+            installed or training fails), 'qlearning' (pure stdlib, always
+            available), or 'auto' (try ppo, silently fall back).
+    """
+    return _train_rl_trading_agent(symbol, source, period, interval, train_frac, episodes, algo)
 
 # ── Resource ───────────────────────────────────────────────────────────────────
 

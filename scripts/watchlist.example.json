@@ -1,0 +1,6 @@
+[
+  {"engine": "ict", "strategy_name": "Liq_Sweep_Reversal", "period": "3mo"},
+  {"engine": "ict", "strategy_name": "OB_Continuation", "period": "3mo"},
+  {"engine": "ict", "strategy_name": "Daily_Bias_PDHPDL", "period": "3mo"},
+  {"engine": "custom", "strategy_name": "01_Liq_Sweep_Reversal", "period": "3mo", "interval": "1h"}
+]
