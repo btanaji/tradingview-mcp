@@ -19,6 +19,13 @@ The Q-learning path is what's actually been run and verified here.
 
 Research-layer / additive strategy source only, same caveat as
 ml_factor_service.py: not wired into any backtest engine's entries/exits.
+
+Optional-dependency note: `algo='qlearning'` is pure stdlib and needs
+neither gymnasium nor numpy — only `algo='ppo'`/`'auto'`'s PPO attempt
+needs them (the `rl` extra). Both imports are guarded so the whole MCP
+server doesn't fail to start just because this one module's PPO path is
+unavailable — the same pattern as risk_service.py's QuantLib guard and
+ml_factor_service.py's LightGBM guard.
 """
 from __future__ import annotations
 
@@ -26,22 +33,29 @@ import random
 import statistics
 from typing import Any, Literal, Optional
 
-import numpy as np
-import gymnasium as gym
-from gymnasium import spaces
-
 from tradingview_mcp.core.services.ml_factor_service import _build_features_and_labels, _FEATURE_NAMES
 from tradingview_mcp.core.services.data_providers import get_ohlcv
 from tradingview_mcp.core.errors import ErrorCode, make_error
 
+try:
+    import numpy as np
+    import gymnasium as gym
+    from gymnasium import spaces
+    GYMNASIUM_AVAILABLE = True
+except ImportError:
+    GYMNASIUM_AVAILABLE = False
+
 _TRANSACTION_COST_PCT = 0.05  # per position flip, in the same % units as the reward
+_EnvBase = gym.Env if GYMNASIUM_AVAILABLE else object
 
 
-class TradingEnv(gym.Env):
+class TradingEnv(_EnvBase):
     """Long/flat trading environment over a fixed sequence of (features,
     next-bar-return) pairs. Action 0 = flat, 1 = long. No short-selling
     (matches core/portfolio.py). One episode = one full pass through the
-    provided rows."""
+    provided rows. Only constructed on the PPO path — never touched by
+    the pure-stdlib qlearning path — so its gymnasium/numpy usage below
+    is safe to leave unguarded."""
 
     metadata = {"render_modes": []}
 
@@ -203,7 +217,14 @@ def train_rl_trading_agent(
     agent = edges = None
     ppo_model = None
 
-    if algo in ("auto", "ppo"):
+    if algo == "ppo" and not GYMNASIUM_AVAILABLE:
+        return make_error(
+            ErrorCode.DEPENDENCY_MISSING,
+            "gymnasium is not installed in this environment — try algo='qlearning' instead. "
+            "pip install \".[rl]\" (or \".[rl-full]\" for PPO via stable-baselines3) to enable it.",
+        )
+
+    if algo in ("auto", "ppo") and GYMNASIUM_AVAILABLE:
         env = TradingEnv(train_X, train_returns)
         ppo_model = _try_ppo(env, total_timesteps=episodes * len(train_X))
         if ppo_model is not None:
