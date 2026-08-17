@@ -78,8 +78,6 @@ from tradingview_mcp.core.services.backtest_service import (
     compare_strategies as _compare_strategies,
     walk_forward_backtest,
 )
-<<<<<<< Updated upstream
-=======
 from tradingview_mcp.core.services.custom_strategy_service import (
     run_custom_backtest, optimize_custom_strategy as _optimize_custom_strategy,
     list_available_strategies,
@@ -123,7 +121,6 @@ from tradingview_mcp.core.services.ml_factor_service import (
 from tradingview_mcp.core.services.rl_service import (
     train_rl_trading_agent as _train_rl_trading_agent,
 )
->>>>>>> Stashed changes
 from tradingview_mcp.core.utils.validators import (
     sanitize_timeframe,
     sanitize_exchange,
