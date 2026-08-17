@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.atilaahmettaner/tradingview-mcp",
+  "description": "Real-time market data, screeners, technical analysis & backtesting for stocks, crypto and forex.",
+  "repository": {
+    "url": "https://github.com/atilaahmettaner/tradingview-mcp",
+    "source": "github"
+  },
+  "version": "0.8.0",
+  "websiteUrl": "https://pro.cryptosieve.com",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.cryptosieve.com/mcp"
+    }
+  ]
+}
