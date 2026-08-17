@@ -298,9 +298,13 @@ def train_rl_trading_agent(
             "backtest_strategy/walk_forward_backtest_strategy with strategy='rl_agent'. "
             "One chronological train/test split, no walk-forward re-training across multiple "
             "windows — treat with the same single-fold skepticism CLAUDE.md applies everywhere "
-            "else. The qlearning fallback discretizes only 4 of the 10 available features into "
-            "3 bins each (state-space size constraint for a tabular method with no function "
-            "approximation) — it is a much cruder policy than PPO would be if stable-baselines3 "
-            "were available."
+            "else." + (
+                " The qlearning fallback discretizes only 4 of the 10 available features into "
+                "3 bins each (state-space size constraint for a tabular method with no function "
+                "approximation) — it is a much cruder policy than PPO would be if stable-baselines3 "
+                "were available."
+                if used_algo == "qlearning" else
+                " Trained via PPO (stable-baselines3) over the full 10-feature observation space."
+            )
         ),
     }

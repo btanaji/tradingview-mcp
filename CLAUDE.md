@@ -314,8 +314,21 @@ LIVE AGENT SYSTEM                                        [BUILT]
   not rebuilt (see data-layer note above); revisit only if the existing
   `tradingview-screener`/`marketaux_service.py` coverage proves
   insufficient.
-- **stable-baselines3/torch** — install with `pip install ".[rl-full]"` to
-  actually exercise `rl_service.py`'s PPO path.
+- **stable-baselines3/torch — VERIFIED, PPO path now confirmed working.**
+  Installed via `pip install "stable-baselines3>=2.0"` (pulls torch) in a
+  fresh venv on this Linux container and re-ran `train_rl_trading_agent`
+  against local XAUUSD CSV data with `algo='ppo'`, `'auto'`, and
+  `'qlearning'`: `algo_used` correctly reported `"ppo"` for the first two
+  (auto now picks PPO once the extra is present) and `"qlearning"` for the
+  third; `backtest_strategy`'s `rl_agent` strategy (which always uses the
+  Q-learning primitives directly, not PPO) was re-verified unaffected
+  (34 trades, +24.78% on 2y XAUUSD). Also fixed a latent bug this exposed:
+  the tool's `disclaimer` field unconditionally warned about "the qlearning
+  fallback['s]... cruder policy than PPO" even when PPO was the model that
+  actually ran — now conditioned on `used_algo`. Torch/stable-baselines3
+  remain optional (`pip install ".[rl-full]"`) — not added as a hard
+  dependency, consistent with the graceful-degradation design elsewhere in
+  this codebase.
 - **LightGBM on this machine** — needs the MSVC redistributable installed
   for `ml_factor_service.py` to use it over the logistic fallback.
 - **Wiring ML/RL research output into an actual strategy — DONE.**
