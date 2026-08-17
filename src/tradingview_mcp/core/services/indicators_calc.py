@@ -245,6 +245,33 @@ def calc_supertrend(
     return {"direction": direction, "upper": upper, "lower": lower}
 
 
+# ─── WMA (Weighted Moving Average) ────────────────────────────────────────────
+
+def calc_wma(closes: list[float], period: int) -> list[Optional[float]]:
+    """Weighted Moving Average — linear weights, most recent bar weighted
+    highest (weight=period), oldest bar in the window weighted lowest (1)."""
+    result: list[Optional[float]] = [None] * len(closes)
+    denom = period * (period + 1) / 2
+    for i in range(period - 1, len(closes)):
+        window = closes[i - period + 1 : i + 1]
+        result[i] = sum(w * v for w, v in enumerate(window, start=1)) / denom
+    return result
+
+
+# ─── Rolling standard deviation ───────────────────────────────────────────────
+
+def calc_stdev(closes: list[float], period: int) -> list[Optional[float]]:
+    """Rolling population standard deviation over `period` bars (same
+    variance formula calc_bollinger already uses inline)."""
+    result: list[Optional[float]] = [None] * len(closes)
+    for i in range(period - 1, len(closes)):
+        window = closes[i - period + 1 : i + 1]
+        mean = sum(window) / period
+        variance = sum((x - mean) ** 2 for x in window) / period
+        result[i] = math.sqrt(variance)
+    return result
+
+
 # ─── Donchian Channel ─────────────────────────────────────────────────────────
 
 def calc_donchian(
