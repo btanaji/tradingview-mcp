@@ -1,0 +1,25 @@
+NAME: HTF_POI_Stop_Raid
+DESCRIPTION: Son's Model — a higher-timeframe swing (draw on liquidity) only qualifies as a tradeable point of interest once a lower/mid timeframe confirms a stop raid at that level (wick through, body fails to close beyond)
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 4h (HTF draw on liquidity identification), 15m (stop-raid confirmation / entry timeframe)
+ZONES:
+- Identify HTF swing highs/lows (5-bar fractal) as candidate draws on liquidity.
+- An HTF swing becomes a qualified POI only once an LTF candle wicks through that level and closes back on the near side (liquidity grab, not a full MSS) — this is the "stop raid" confirmation step of the 3-tier top-down model (identify DOL -> confirm stop raid on mid timeframe -> time entry on lowest timeframe).
+- Zone spans from the stop-raid candle's wick extreme to the HTF level itself.
+ENTRY_CONFIRMATION: [OPTIONS]
+- close_beyond: the LTF candle closes beyond the zone's near edge (the HTF level) in the trade direction
+- wick_reject: the LTF candle that performed the stop raid itself closes back through the zone by at least 50% of its own range
+- midpoint_close: an LTF candle closes beyond the zone's 50% midpoint in the trade direction
+STOP_LOSS: [OPTIONS]
+- swing_based: stop beyond the stop-raid candle's wick extreme (the zone's outer edge)
+- opposing_candle: stop beyond the wick extreme of the confirmation/entry candle itself
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at 2R
+- partial_1_5R: partial at 1.5R, remainder trailed by new swing points
+- trail_only: trail behind new swing points once 1R is reached, for a major HTF DOL with a distant target
+FILTERS:
+- Only trade in the direction implied by the stop raid (raid of a swing low = bullish POI; raid of a swing high = bearish POI).
+NOTES:
+- Source: Reading Stuff/Sons_Model_HTF-TTrades_edu.pdf.
+- Source describes a 3-tier cascade (e.g. D1/H4 DOL -> H1 stop raid -> M5 entry); this implementation collapses it to 2 tiers (HTF DOL, LTF stop-raid + entry) to match the server's 2-timeframe (ltf/htf) architecture — a documented simplification, not a 1:1 port.
+- Runs on the ICT registry engine (zones_htf_poi_stop_raid in ict_strategies.py) — see interpreted_rules.zone_source in backtest results to confirm.

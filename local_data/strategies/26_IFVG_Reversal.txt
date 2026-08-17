@@ -1,0 +1,24 @@
+NAME: IFVG_Reversal
+DESCRIPTION: Inverse Fair Value Gap — a Fair Value Gap that gets invalidated (price closes fully through its far edge) flips polarity and becomes a zone favoring the opposite direction
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 1h, 4h
+ZONES:
+- Identify Fair Value Gaps (3-candle gaps, as FVG_Rebalance).
+- An FVG "flips" (becomes an Inverse FVG) once a later candle CLOSES fully through its far edge — a bullish FVG that gets closed through becomes a supply zone; a bearish FVG that gets closed through becomes a demand zone.
+- The flipped zone spans the same price band as the original FVG.
+ENTRY_CONFIRMATION: [OPTIONS]
+- close_beyond: a candle closes beyond the flipped zone's near edge in the (new) trade direction
+- wick_reject: the flip-triggering candle itself closes back through the zone by at least 50% of its own range
+- midpoint_close: a candle closes beyond the zone's 50% midpoint in the trade direction
+STOP_LOSS: [OPTIONS]
+- swing_based: stop beyond the zone's far edge (the original FVG's now-invalidated boundary)
+- opposing_candle: stop beyond the wick extreme of the entry/confirmation candle itself
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at 2R
+- partial_1_5R: partial at 1.5R, remainder trailed by new swing points
+- trail_only: trail behind new swing points once 1R is reached
+FILTERS:
+- Only trade the first retest of a given flipped zone (avoid stale/repeatedly-tapped IFVGs) — enforced by this server's shared max_zone_taps mechanism.
+NOTES:
+- Source: algostorm.com/ict-smc-entry-models/, "Advanced Concepts: Inverse Fair Value Gaps (IFVG)". The source page notes this is simply the classical "polarity principle" (broken support becomes resistance) applied to gaps specifically — not a novel market mechanic.
+- Runs on the ICT registry engine (zones_ifvg_reversal in ict_strategies.py) — see interpreted_rules.zone_source in backtest results to confirm.

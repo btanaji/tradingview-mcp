@@ -1,0 +1,33 @@
+NAME: Liq_Sweep_Reversal
+DESCRIPTION: Reversal entry after a liquidity pool is swept and price closes back through the pre-sweep swing point
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 1h, 4h (pool identification), 15m, 5m (confirmation), 1m (entry trigger)
+LIQUIDITY_POOLS:
+- A swing high/low is defined as a 5-bar fractal: a candle whose high (low) is higher (lower) than the 2 candles immediately before it and the 2 candles immediately after it, on the timeframe being analyzed.
+- Buy-side liquidity (BSL) is the price of the most recent unbroken swing high on the 1h/4h chart. Sell-side liquidity (SSL) is the price of the most recent unbroken swing low.
+- Rank candidate pools by recency in this order: prior session high/low, prior day high/low, prior week high/low. Use whichever qualifying pool sits closest to current price.
+- A pool is "swept" only when a completed candle's wick trades through the pool's price level. A wick that touches but does not cross the level does not count as a sweep.
+- Once a pool is swept, remove it from the active pool list. Do not reuse a swept pool as a target for a future setup.
+CONFIRMATION_SEQUENCE:
+- Identify the most recent swing point (per the LIQUIDITY_POOLS fractal definition) on the confirmation timeframe that formed before the sweep candle.
+- A valid reversal signal requires a completed candle to close (not just wick) beyond that pre-sweep swing point, in the direction opposite the sweep.
+- If no such close occurs within 20 candles of the sweep on the confirmation timeframe, the setup is invalid and must be discarded.
+ENTRY_CONFIRMATION: [OPTIONS]
+- close_beyond: the confirmation-timeframe candle closes beyond the pre-sweep swing point (CONFIRMATION_SEQUENCE) in the trade direction — the primary trigger for this strategy
+- wick_reject: the sweep candle itself closes back inside the pre-sweep range by at least 50% of its own high-low range — a faster substitute that skips waiting for a separate confirmation candle, at the cost of a higher false-signal rate
+- engulfing: the confirmation-timeframe candle's body fully engulfs the body of the candle immediately before it, in the direction opposite the sweep — an alternative to close_beyond when individual candles are small relative to the distance to the pre-sweep swing point
+STOP_LOSS: [OPTIONS]
+- swing_based: stop placed beyond the wick extreme of the candle that performed the sweep — the primary stop, since a return through that extreme means the sweep failed to hold
+- opposing_candle: stop placed beyond the wick extreme of the confirmation candle itself (the candle that triggered close_beyond) — tighter than swing_based, useful on the 1m entry timeframe
+- fixed_atr: stop placed 1.5x ATR(14) beyond the sweep candle's wick extreme — use when the sweep wick is unusually small and swing_based alone would sit too close to entry
+(all modes: clamp to broker/data minimum stop distance if too tight)
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at a fixed 2R — appropriate for the base case, where the next unswept liquidity pool sits roughly two stop-distances away
+- partial_1_5R: partial close at 1.5R, remainder moved to breakeven and trailed by new swing points toward the next pool — appropriate when the identified pool sits well beyond 2R and the trade can be allowed to run
+- trail_only: no fixed target, trail behind new swing points once 1R is reached — appropriate on a major HTF sweep where the eventual target pool is far away and hard to size in advance
+FILTERS:
+- Skip entry if the sweep candle formed more than 4 hours before the confirmation candle's close (stale sweep)
+- Skip entry if a high-impact news release is scheduled within 30 minutes of the confirmation candle's close
+- Allow only one open position per identified pool at a time
+NOTES:
+- General-purpose sweep-and-reverse engine. Liq_to_Liq_Range, Liq_FVG_Combo, Session_Liquidity_ALN, AMD_Order_Flow, and Daily_Bias_PDHPDL are variations of this same underlying mechanism at different scope — consider implementing this as one shared module with parameters rather than five separate ones.

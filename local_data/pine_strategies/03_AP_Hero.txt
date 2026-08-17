@@ -1,0 +1,43 @@
+NAME: AP_Hero_Flow_Pressure
+SYMBOL_DEFAULT: XAUUSD
+INTERVAL: 5m
+PERIOD: 2y
+[SCRIPT]
+// Adapted from "AP Capital - HIRO Proxy (Flow Pressure)" for pine_lite v1.
+// Changes from the original (see 03_AP_Hero.txt backtest notes):
+//  - input.* calls replaced with hardcoded values (script inputs unsupported)
+//  - the var/:= cumulative pressure accumulator replaced with a smoothed,
+//    non-cumulative pressure series (persistent state unsupported; this also
+//    avoids the original's unbounded drift over a long backtest window)
+//  - lenZ (z-score lookback) reduced from 5000 to 200 bars
+//  - the daily-reset option (time("D") + resetD) is dropped along with the
+//    cumulative state it depended on
+//  - volume weighting DROPPED: XAUUSD_M5.csv has no volume column (verified
+//    all-zero on load), so the original's vw = log(volume) term collapsed
+//    to log(1) = 0 on every bar, zeroing the entire pressure signal end to
+//    end (0 trades). pressure is now directional-efficiency-only.
+//  - TREND FILTER swapped from EMA-50 to the server's daily-bias detector
+//    (ict_detectors.classify_daily_bias_v2, failure-to-displace model):
+//    dailyBiasBullish/dailyBiasBearish are extra per-bar variables this
+//    server injects automatically (not real Pine syntax) from the daily
+//    chart's PDH/PDL continuation-vs-reversal read, fail-CLOSED (both 0
+//    when the daily bias is undefined) so an ambiguous regime trades LESS,
+//    not more. weeklyBiasBullish/weeklyBiasBearish (from
+//    classify_weekly_profile) are also available the same way.
+rng = math.max(high - low, 0.0001)
+atr14 = ta.atr(12)
+atrOk = rng >= atr14 * 0.6
+eff = (close - open) / rng
+pressure = atrOk ? eff : 0.0
+sm = ta.ema(pressure, 9)
+mean = ta.sma(sm, 200)
+stdev = ta.stdev(sm, 200)
+z = stdev == 0 ? 0 : (sm - mean) / stdev
+[Buy Condition]
+ta.crossover(z, 1.5) and dailyBiasBullish == 1
+[Sell Condition]
+ta.crossunder(z, -1.5) and dailyBiasBearish == 1
+[SL]
+fixed_pct: 1.5
+[TP]
+rr_multiple: 4.0

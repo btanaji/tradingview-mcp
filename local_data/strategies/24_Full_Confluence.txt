@@ -1,0 +1,24 @@
+NAME: Full_Confluence
+DESCRIPTION: Maximum-confirmation entry stacking external liquidity sweep, displacement-confirmed MSS, internal liquidity (IDM) sweep, and an FVG that overlaps the leg's 62-79% OTE zone
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 4h (HTF sweep/MSS/displacement), 15m (IDM + FVG + OTE entry)
+ZONES:
+- External liquidity sweep + close-beyond MSS confirmation (as Liq_Sweep_Reversal).
+- The MSS confirmation candle must qualify as a displacement candle (body size >= 1x ATR(14) — no numeric threshold given in source material, this is an implementation judgment call).
+- An internal swing point within the displacement leg must be swept (inducement/IDM, as FVG_Inducement).
+- The Fair Value Gap left within the leg must overlap the leg's 62-79% Fibonacci retracement (OTE) zone — if it doesn't overlap, the setup is not "full confluence" and is discarded.
+ENTRY_CONFIRMATION: [OPTIONS]
+- close_beyond: a candle closes beyond the combined FVG/OTE zone's near edge in the trade direction
+- midpoint_close: a candle closes beyond the combined zone's 50% midpoint in the trade direction
+- engulfing: the entry candle's body engulfs the prior candle's body in the trade direction
+STOP_LOSS: [OPTIONS]
+- swing_based: stop beyond the IDM sweep candle's wick extreme
+- fixed_atr: stop 1.5x ATR(14) beyond the IDM sweep candle's wick extreme
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at 2R
+- partial_1_5R: partial at 1.5R, remainder trailed by new swing points
+FILTERS:
+- All four conditions (sweep, displacement MSS, IDM sweep, FVG/OTE overlap) must be present; missing any one disqualifies the setup entirely (no partial-confluence fallback).
+NOTES:
+- Source: algostorm.com/ict-smc-entry-models/, "Model 4: The Full Confluence Model". The source page explicitly frames this model as rare and prone to overfitting/paralysis/retrofitting ("stacking this many subjective requirements... traders wait endlessly for perfect setups that rarely materialize" or unconsciously loosen criteria after the fact) — implemented as described, not endorsed as a high-edge setup. Expect very few trades; check walk_forward_verdict carefully before trusting any apparent edge, precisely because of the overfitting risk the source itself calls out.
+- Runs on the ICT registry engine (zones_full_confluence in ict_strategies.py) — see interpreted_rules.zone_source in backtest results to confirm.

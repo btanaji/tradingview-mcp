@@ -1,0 +1,25 @@
+NAME: FVG_Rebalance
+DESCRIPTION: Entry on a retracement into an unfilled 3-candle fair value gap with a reaction confirming the imbalance is being respected
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 1h (gap identification), 15m, 5m, 1m (entry)
+FAIR_VALUE_GAPS:
+- A fair value gap (FVG) is defined on 3 consecutive candles. Bullish FVG: candle 1's high must be lower than candle 3's low, leaving an unfilled price range between them. Bearish FVG: candle 1's low must be higher than candle 3's high.
+- An FVG is unfilled as long as no subsequent candle has closed all the way through it. Once a candle closes beyond the far edge of the gap, the gap is marked filled and is no longer a valid target.
+- A partially filled gap (price has wicked into it but no candle has closed through it) remains valid, but only the unfilled remainder of the gap is used for entry.
+ENTRY_CONFIRMATION: [OPTIONS]
+- wick_reject: price wicks into the gap and the entry-timeframe candle closes back outside it in the direction of the original impulse — the primary trigger for this strategy
+- close_beyond: entry-timeframe candle closes beyond its own most recent minor swing point while inside the gap — a stronger-confirmation alternative to wick_reject
+- engulfing: the reaction candle inside the gap fully engulfs the body of the candle immediately before it, in the direction of the original impulse — a third valid trigger, useful when the gap is being tested by small-bodied candles that would not otherwise clear a nearby swing point
+STOP_LOSS: [OPTIONS]
+- swing_based: stop placed beyond the swing point that produced the impulsive move which created the gap — the primary stop, since that swing point defines the gap's origin
+- fixed_atr: stop placed 1.2x ATR(14) beyond the gap's far edge — use when the originating swing point sits too far away to give a reasonably tight stop
+(all modes: clamp to broker/data minimum stop distance if too tight)
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at a fixed 2R — appropriate for the base case, since the gap's near edge is usually within one to two stop-distances of entry
+- trail_only: no fixed target, trail behind new swing points once 1R is reached — appropriate when the move extends past the gap toward a further liquidity pool
+FILTERS:
+- Skip entry if the gap is more than 60% filled already
+- Skip entry if the gap was identified on a timeframe below 15m and there is no 1h or higher-timeframe gap or order block within the same price range
+- Skip entry if price is trading against the higher-timeframe (1h) trend direction into the gap
+NOTES:
+- Base case of BPR_FVG_Overlap, which is the stricter two-gap version of this same setup.

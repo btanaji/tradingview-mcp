@@ -1,0 +1,26 @@
+NAME: OB_Continuation
+DESCRIPTION: Trend-following entry on a retracement into a valid order block that holds without a body close through its extreme
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 1d, 4h (trend and order block identification), 15m, 5m (entry)
+ORDER_BLOCKS:
+- Trend direction is bullish if the two most recent HTF (1d/4h) swing points (per Liq_Sweep_Reversal's fractal definition) form a higher high and a higher low. Trend is bearish if they form a lower low and a lower high. If neither pattern is present, trend is undefined and this strategy does not trade.
+- A candidate order block is the last opposite-colored candle (a bearish candle before a bullish move, a bullish candle before a bearish move) immediately preceding a break of structure — a candle that closes beyond the prior swing high/low in the trend direction.
+- A candidate order block is valid only if both of the following are true: (1) a liquidity pool (a prior swing high/low) was swept in the 3 candles immediately before the order block candle, and (2) the impulsive move away from the order block leaves a 3-candle fair value gap in the trend direction. If either condition fails, the candle is not used as an order block by this file.
+ENTRY_CONFIRMATION: [OPTIONS]
+- wick_reject: price wicks into the order block and the entry-timeframe candle closes back outside it in the trend direction — the primary trigger for this strategy
+- close_beyond: a lower-timeframe (5m) candle closes beyond its own most recent minor swing point while price is inside the order block, confirming a shift back in the trend direction — a slower, higher-confirmation alternative to wick_reject
+- midpoint_close: the entry-timeframe candle closes beyond the order block's 50% midpoint in the trend direction — replaces an unconfirmed resting limit order at the midpoint with a confirmed close, since the parser requires a triggering candle rather than a bare resting order
+STOP_LOSS: [OPTIONS]
+- swing_based: stop placed beyond the order block's far extreme (the wick, not the body) — the primary stop; a close through that extreme reclassifies the setup as Breaker_Block_Reversal, not this file
+- fixed_atr: stop placed 1.5x ATR(14) beyond the order block's far extreme — use when the order block itself is unusually small relative to typical volatility
+(all modes: clamp to broker/data minimum stop distance if too tight)
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at a fixed 2R — appropriate when the next break-of-structure level sits roughly two stop-distances away
+- partial_1_5R: partial close at 1.5R, remainder to breakeven and trailed by new HTF swing points toward the next break-of-structure level — appropriate when riding the full HTF leg
+- trail_only: no fixed target, trail behind new HTF swing points once 1R is reached — appropriate in a strongly trending market where the next break-of-structure level is not yet visible
+FILTERS:
+- Skip entry if a candle has already closed (body, not wick) beyond the order block's far extreme — this reclassifies the setup as Breaker_Block_Reversal, not this strategy
+- Skip entry if trend direction (per ORDER_BLOCKS rule 1) is undefined
+- Allow only one open position per order block at a time
+NOTES:
+- Same underlying logic as Mitigation_Block; this file describes it from the continuation side. Breaker_Block_Reversal is the mirror case where the order block fails instead of holding.

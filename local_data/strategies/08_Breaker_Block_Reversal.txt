@@ -1,0 +1,23 @@
+NAME: Breaker_Block_Reversal
+DESCRIPTION: Reversal entry on the retest of an order block that has fully failed (price closed through its extreme before reversing)
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 4h, 1h (identification), 15m, 5m (entry)
+BREAKER_DEFINITION:
+- Start with a candidate order block as defined in OB_Continuation.
+- The order block is reclassified as a breaker block only if a subsequent candle's body (the close price, not the wick) trades beyond the order block's far extreme, invalidating it, and this close is followed by a structure shift in the opposite direction.
+- If price only wicks through the order block's extreme without a body close beyond it, the block remains a valid order block (see OB_Continuation and Mitigation_Block) and must not be treated as a breaker.
+ENTRY_CONFIRMATION: [OPTIONS]
+- wick_reject: price retests the broken order block, wicks into it, and closes back out in the new direction — the primary trigger, matching the "retest and reject" nature of a breaker
+- close_beyond: entry-timeframe candle closes beyond its own most recent minor swing point while retesting the broken order block — a stronger-confirmation alternative to wick_reject
+STOP_LOSS: [OPTIONS]
+- swing_based: stop placed beyond the breaker block's far extreme, on the side opposite the new trade direction — the primary stop
+- fixed_atr: stop placed 1.5x ATR(14) beyond the breaker block's far extreme — use when the breaker block itself is unusually small
+(all modes: clamp to broker/data minimum stop distance if too tight)
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at a fixed 2R — the base case
+- partial_1_5R: partial close at 1.5R, remainder to breakeven and trailed by new swing structure toward the next liquidity pool or opposing PD array — the standard choice when the reversal has strong HTF support
+FILTERS:
+- Skip entry if the invalidating close (per BREAKER_DEFINITION) cannot be confirmed as a body close beyond the extreme using only a wick — this is the single most common source of breaker/mitigation misclassification and must be checked explicitly, not assumed
+- Skip entry if there is no higher-timeframe (4h/1d) support for the new direction
+NOTES:
+- Mirror case of Mitigation_Block. Both share the same retest mechanic; this file applies when the order block fails, Mitigation_Block applies when it holds.

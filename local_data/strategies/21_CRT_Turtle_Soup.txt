@@ -1,0 +1,27 @@
+NAME: CRT_Turtle_Soup
+DESCRIPTION: Candle Range Theory — a reference-timeframe candle's high/low becomes the CRT range; the following candle wicks beyond one side and closes back inside (turtle soup), triggering a reversal entry back toward the CRT midpoint/opposite side
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 4h (CRT range), 15m (TSQ entry timeframe)
+ZONES:
+- CRT High/Low = the high/low of the prior candle on the reference (HTF) timeframe.
+- A CRT is confirmed when the current HTF candle wicks beyond the CRT High or CRT Low, then closes back inside the CRT range (turtle soup / TSQ).
+- The tradeable zone spans from the swept extreme to the CRT range's 50% midpoint — matches the documented rule of booking partials / moving to breakeven at the midpoint of the range.
+- High-probability filter (documented but not separately parsed at runtime — treat as manual confluence check): a PD array (order block, FVG, breaker) should sit beyond the CRT low (for longs) / above the CRT high (for shorts), and the setup should align with HTF premium/discount (only buy in HTF discount, only sell in HTF premium).
+ENTRY_CONFIRMATION: [OPTIONS]
+- wick_reject: the LTF candle closes back inside the CRT range after tagging the zone — the primary turtle-soup trigger
+- close_beyond: the LTF candle closes beyond the zone's near edge in the trade direction, confirming order flow has turned
+- engulfing: the LTF confirmation candle's body engulfs the prior candle's body in the trade direction
+STOP_LOSS: [OPTIONS]
+- swing_based: stop beyond the zone's swept extreme (the CRT high/low that was wicked through)
+- fixed_atr: stop 1.5x ATR(14) beyond the swept extreme, for use when the wick is small
+TAKE_PROFIT: [OPTIONS]
+- partial_1_5R: partial at 1.5R, remainder trailed toward the CRT midpoint and beyond — matches the documented 50%-of-range management rule
+- fixed_2R: full close at 2R for the base case
+- trail_only: trail behind new swing points once 1R is reached, for a major HTF CRT with a distant opposite-range target
+FILTERS:
+- Reference-timeframe CRT candle-open alignment (documented, not enforced at runtime): Forex 4H ~1am/5am/9am EST; Forex 1H ~1-3am/5-6am/9-10am EST; Index futures 4H ~2am/6am/10am EST.
+- Skip if no PD array is present beyond the CRT extreme opposite the entry direction (manual confluence check per ZONES).
+NOTES:
+- Source: Guardeer/CRT Book.pdf, Reading Stuff/CRT part 1.pdf, CRT part 2.pdf, CANDLE RANGE THEORY.pdf.
+- TBS (Turtle Body Soup) as a distinct body-close variant of turtle soup is named in source material but its exact mechanics were not recoverable from readable PDFs — this implementation treats wick-sweep + close-back-inside as the core CRT signal; a stricter TBS variant (body, not wick, violates the prior candle) is a documented judgment call, not yet implemented separately.
+- Runs on the ICT registry engine (zones_crt_turtle_soup in ict_strategies.py) — see interpreted_rules.zone_source in backtest results to confirm.

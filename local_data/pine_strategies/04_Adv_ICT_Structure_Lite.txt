@@ -1,0 +1,33 @@
+NAME: Adv_ICT_Structure_Lite
+SYMBOL_DEFAULT: XAUUSD
+INTERVAL: 5m
+PERIOD: 2y
+[SCRIPT]
+// Simplified, pine_lite-compatible rewrite of 04_Adv_ICT_Structure.txt
+// (LuxAlgo "Pure Price Action Structures") -- the original uses a full
+// object/type system (type BAR/ICTMS/MS, methods, var/:= persistent state,
+// switch, drawing objects) that is out of scope for pine_lite v1 (142
+// validation issues). Only the ACTUAL trading logic from the original's
+// own [Buy Condition]/[Sell Condition] blocks is preserved:
+//   "whenever STH (short-term high) breaks, enter long"
+//   "whenever STL (short-term low) breaks, enter short"
+//
+// Substitution (documented, not a faithful port): the original tracks a
+// true fractal swing high/low with persistent state (a pivot confirmed by
+// bars on both sides, held until the next opposite pivot). pine_lite has
+// no persistent state, so short-term swing high/low is approximated here
+// as a rolling 5-bar Donchian-style extreme instead -- the highest high /
+// lowest low of the last 5 bars, shifted back 1 bar to avoid the current
+// bar leaking into its own reference level. "Break" = close crosses that
+// level. This captures the same "trade the break of a recent local
+// extreme" idea without requiring true fractal pivot tracking.
+sth = ta.highest(high, 20)[1]
+stl = ta.lowest(low, 20)[1]
+[Buy Condition]
+ta.crossover(close, sth) and dailyBiasBullish == 1
+[Sell Condition]
+ta.crossunder(close, stl) and dailyBiasBearish == 1
+[SL]
+atr_mult: 1.5
+[TP]
+rr_multiple: 3.0

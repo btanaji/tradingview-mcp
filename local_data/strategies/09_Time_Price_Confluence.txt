@@ -1,0 +1,24 @@
+NAME: Time_Price_Confluence
+DESCRIPTION: Filter requiring both a killzone time window and a premium/discount price zone to align before allowing an underlying entry technique to fire
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 4h, 1d (premium/discount range), session clock (time), 15m, 5m, 1m (entry)
+FILTER_DEFINITION:
+- Time component: current time, converted to EST, must fall inside one of the SESSION_WINDOWS defined in Killzone_Intraday.
+- Price component: define the current HTF (4h/1d) range and split it at its 50% midpoint. For a long entry, price must be in the lower half (discount) of the range. For a short entry, price must be in the upper half (premium).
+- Both components must be true at the same time, and a liquidity sweep plus structure shift (per Liq_Sweep_Reversal) must also be present, before any entry is allowed.
+- If only the time component or only the price component is satisfied, no entry is taken.
+ENTRY_CONFIRMATION: [OPTIONS]
+- close_beyond: once both the time and price components in FILTER_DEFINITION are satisfied, a candle closes beyond the relevant pre-sweep or pre-retracement minor swing point in the trade direction — the primary trigger, hardcoded here rather than referenced from another file because the parser has no mechanism to call another file's logic at runtime
+- wick_reject: once both FILTER_DEFINITION components are satisfied, price wicks into the relevant zone (the swept pool or the order block) and closes back out in the trade direction — a faster hardcoded alternative to close_beyond
+STOP_LOSS: [OPTIONS]
+- swing_based: stop placed beyond the swing point or order block extreme relevant to whichever pattern triggered entry — hardcoded rather than inherited, since the parser cannot reference another file's stop-loss rule at runtime
+- fixed_atr: stop placed 1.5x ATR(14) beyond that same reference point — use when the swing point or block is unusually small
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at a fixed 2R — hardcoded default, matching the base case used across the underlying entry techniques this file gates
+- partial_1_5R: partial close at 1.5R, remainder to breakeven and trailed by new swing structure — hardcoded default matching the standard choice for a bias-aligned, double-confluence setup
+FILTERS:
+- Skip entry if either the time component or the price component is satisfied alone but not both
+- Skip entry if there is no clearly defined HTF range from which to calculate premium/discount (a choppy or undefined range)
+NOTES:
+- This is a confluence filter layered on top of Liq_Sweep_Reversal or OB_Continuation, not an independent entry engine. Implement as a boolean gate those two modules check before firing, rather than as a separate signal generator.
+- Parser compatibility: this file previously described its ENTRY_CONFIRMATION/STOP_LOSS/TAKE_PROFIT as "inherit_liq_sweep_reversal" / "inherit_ob_continuation" / "inherit_from_underlying_strategy," referencing those other files by name. The parser has no concept of cross-file inheritance, so those references have been replaced above with a hardcoded, self-contained copy of the same logic. If Liq_Sweep_Reversal or OB_Continuation's rules are edited later, this file will not update automatically — it must be edited to match by hand.

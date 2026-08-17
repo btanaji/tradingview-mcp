@@ -1,0 +1,41 @@
+NAME: HTF_OB_Tap_LTF_MSS
+DESCRIPTION: HTF order block tap with LTF market structure shift (BOS) confirmation entry, fixed R:R target
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: HTF (bias/OB) = 15m, 30m, 1H, 4H, D (selectable) | LTF (confirmation) = 1m, 5m, 15m (selectable, default 5m)
+ZONES:
+- Identify order blocks (OB) on the HTF only from the candle that actually originated the move (the initial impulse candle), not every candle in the rally
+- OB is valid only if the impulse leg leaves a genuine Fair Value Gap (FVG) behind it - no FVG, no OB
+- If the origin candle is an inside bar, use its mother candle's high/low as the true OB boundaries instead
+- Zone remains valid (re-tappable) and keeps extending forward until price trades back into it
+- On mitigation (first tap), zone is greyed out and stops extending; this tap event also arms the trade setup in that direction
+ENTRY_CONFIRMATION: [OPTIONS]
+- close_beyond (ACTIVE): after an HTF OB tap arms a directional bias, confirmation requires an LTF candle to close beyond the last confirmed LTF swing high (long) or swing low (short); entry is taken on that same LTF candle. This is the recognized-token equivalent of the previous custom "structure_bos" label — an LTF Break of Structure is, mechanically, exactly what close_beyond describes (a confirmation candle closing beyond a defined reference level), so the behavior is unchanged, only the label is.
+- engulfing: (not used in this version)
+- wick_reject: (not used in this version)
+- midpoint_close: (not used in this version)
+FILTERS ON ARMED SETUP:
+- Setup is cancelled (never enters) if price closes back through the OB's far edge before BOS occurs - treated as a failed tap
+- Setup is cancelled if more than N LTF bars (default 50) pass after the tap with no BOS - treated as stale
+- Most recent tap always overwrites any previously armed, unconfirmed setup on the same side
+STOP_LOSS: [OPTIONS]
+- swing_based (ACTIVE): stop placed at whichever is tighter (closer to entry) of two structural reference points — (a) the LTF swing point that was broken to trigger the BOS confirmation, or (b) the far edge of the tapped HTF order block. Both candidates are swing-type structural levels (the OB's far edge is itself the swing/impulse-origin point that defined the OB), so this composite tighter-of-two rule is expressed under the single recognized swing_based token rather than a separate custom "tighter_of_two" label; the specific behavior of this file is the tie-break ("pick whichever of the two is tighter"), which the label alone does not capture and must be read from this explanation.
+- opposing_candle: (not used in this version)
+- fixed_atr: (not used in this version)
+(all modes: clamp to broker/data minimum stop distance if too tight - not yet implemented in this version, flagged as a TODO)
+TAKE_PROFIT: [OPTIONS]
+- partial_1_5R: (not used in this version)
+- fixed_2R (ACTIVE, adjustable): full close at fixed R:R multiple of the stop distance, default 2R, no partials
+- trail_only: (not used in this version)
+FILTERS:
+- Only one open position at a time across the whole script (no simultaneous long+short, no pyramiding)
+- Only one armed setup per side at a time (long arm and short arm tracked independently)
+- Long/short entries can each be toggled on/off independently
+POSITION_SIZING:
+- Risk a fixed % of account equity per trade (default 1%), quantity derived from stop distance rather than a fixed contract/share count
+- Assumes point value of 1 (correct for most FX pairs, spot metals, crypto, single-share stocks; futures with a contract multiplier need syminfo.pointvalue folded into the qty calc - not yet implemented)
+NOTES:
+- Reuses the OB+FVG detection engine from the MTF_OBs indicator (same swing-filter and inside-bar-correction logic), reduced to a single HTF for a clean directional bias
+- LTF swing points detected via ta.pivothigh/pivotlow pulled through request.security, independent of chart timeframe
+- Entries fill at the next bar open per standard Pine Script strategy execution (order placed on BOS bar close)
+- File: HTF_OB_Tap_LTF_MSS_Strategy.pine
+- Parser compatibility: ENTRY_CONFIRMATION and STOP_LOSS previously used two custom active tokens outside the recognized set — "structure_bos" and "tighter_of_two" — while listing all of the recognized options as inactive placeholders. Both custom tokens have been renamed onto their nearest recognized equivalent (close_beyond and swing_based respectively) with the original behavior preserved in the explanation text, rather than lost. TAKE_PROFIT was already using the recognized fixed_2R token and did not need a change.

@@ -1,0 +1,34 @@
+NAME: Daily_Bias_PDHPDL
+DESCRIPTION: Predicts the next daily candle's target using today's PDH/PDL sweep-and-close behavior, filtered by daily trend bias
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 1d (bias and sweep classification), 15m, 5m (entry confirmation)
+DAILY_BOUNDARY:
+- Use one fixed daily candle boundary throughout: broker daily close, NY midnight, or the true day (20:00-20:00 CET / 14:00-14:00 EST). Do not mix boundaries between the bias calculation and the PDH/PDL levels.
+BIAS_AND_SWEEP_CLASSIFICATION:
+- Daily bias is bullish if the two most recent daily candles form a higher high and a higher low; bearish if they form a lower low and a lower high; undefined otherwise, in which case no trade is taken.
+- Classify today's candle (Candle B) against yesterday's candle (Candle A) into exactly one of these five outcomes:
+  1. No sweep of either PDH or PDL: no signal, skip.
+  2. Sweeps one side, closes back inside Candle A's range: Case 1, tradeable.
+  3. Sweeps one side, closes beyond Candle A's opposite extreme: Case 2 (stronger conviction), tradeable.
+  4. Sweeps one side, closes beyond that same side with no reclaim: continuation day, not tradeable under this file.
+  5. Sweeps both PDH and PDL: outside day, not tradeable under this file.
+- Only outcomes 2 and 3 are tradeable, and only when the sweep direction agrees with the daily bias defined above: a PDL sweep is only tradeable long when bias is bullish; a PDH sweep is only tradeable short when bias is bearish. A sweep that contradicts the daily bias is not traded by this file.
+ENTRY_ZONE:
+- Take Candle B's own high-to-low range and split it at 50%. For a long setup, the entry zone is the lower half (discount) of Candle B's range. For a short setup, the entry zone is the upper half (premium) of Candle B's range.
+ENTRY_CONFIRMATION: [OPTIONS]
+- close_beyond: once price is inside the ENTRY_ZONE, a 15m or 5m candle closes beyond its own most recent minor swing point in the trade direction (a market structure shift) — the primary trigger
+- wick_reject: once price is inside the ENTRY_ZONE, price wicks into the resulting order block or fair value gap left by the market structure shift and closes back out in the trade direction on the same candle — a tighter-stop alternative to close_beyond, replacing an open-ended retest wait with a defined reject-and-continue trigger
+STOP_LOSS: [OPTIONS]
+- swing_based: stop placed beyond Candle B's own opposite extreme — below Candle B's low for longs, above Candle B's high for shorts. This is the primary stop and also the invalidation point for the daily bias read.
+- fixed_atr: stop placed 1.5x ATR(14) beyond Candle B's opposite extreme — use when Candle B's range is unusually small relative to typical daily volatility
+(all modes: clamp to broker/data minimum stop distance if too tight)
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at a fixed 2R — usable when Candle B's opposite extreme sits close to a 2R distance from entry
+- partial_1_5R: partial close at 1.5R, remainder to breakeven and trailed toward Candle B's high/low and any additional swing high/low resting just beyond it — the primary choice, matching the original design of treating Candle B's extreme as a partial rather than always the final exit
+FILTERS:
+- Skip entry if today's candle falls into classification outcomes 1, 4, or 5 (per BIAS_AND_SWEEP_CLASSIFICATION)
+- Skip entry if the sweep direction contradicts the daily bias (see BIAS_AND_SWEEP_CLASSIFICATION)
+- Skip entry if the market structure shift confirmation (per ENTRY_CONFIRMATION) occurs outside the London (02:00-05:00 EST) or New York (07:00-10:00 EST) windows
+- Skip entry if a scheduled high-impact news release falls at or near today's daily close, since it can distort which classification outcome applies
+NOTES:
+- Mirrors DailyBiasEA.mq5 (PDH/PDL sweep/MSS strategy, trend-aligned entries only). This file is the fully-specified, ported version of that EA's logic for backtesting and cross-reference.

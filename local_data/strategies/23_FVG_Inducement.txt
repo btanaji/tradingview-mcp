@@ -1,0 +1,27 @@
+NAME: FVG_Inducement
+DESCRIPTION: Liquidity sweep + MSS entry, refined by requiring a minor internal swing point within the displacement leg (inducement/IDM) to also be swept before the resulting FVG is treated as a valid entry
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 1h, 4h (sweep/MSS identification), 15m (inducement + FVG entry)
+ZONES:
+- Identify an external liquidity sweep (per Liq_Sweep_Reversal's LIQUIDITY_POOLS definition) followed by a close beyond the pre-sweep opposite swing (MSS confirmation).
+- Within that displacement leg (sweep candle to MSS confirmation candle), identify minor internal swing points (a 3-bar fractal, since displacement legs are often too short for a 5-bar fractal to register a pivot).
+- Inducement (IDM): the setup only becomes valid once a subsequent candle sweeps one of these internal swing points.
+- The tradeable zone is the Fair Value Gap (3-candle gap) left within the displacement leg, entered only after the IDM sweep confirms.
+ENTRY_CONFIRMATION: [OPTIONS]
+- close_beyond: a candle closes beyond the FVG's near edge in the trade direction after the IDM sweep
+- wick_reject: the IDM-sweep candle itself closes back through the FVG by at least 50% of its own range
+- midpoint_close: a candle closes beyond the FVG's 50% midpoint in the trade direction
+STOP_LOSS: [OPTIONS]
+- swing_based: stop beyond the IDM sweep candle's wick extreme
+- opposing_candle: stop beyond the wick extreme of the entry/confirmation candle itself
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at 2R
+- partial_1_5R: partial at 1.5R, remainder trailed by new swing points
+- trail_only: trail behind new swing points once 1R is reached
+FILTERS:
+- Skip if no internal swing point can be identified within the displacement leg (leg too short/too few candles).
+- Skip if the IDM sweep does not occur within 20 candles of the MSS confirmation.
+NOTES:
+- Source: algostorm.com/ict-smc-entry-models/, "Model 2: FVG + Internal Liquidity (Inducement)". The source page is a critical/skeptical analysis of ICT methodology and explicitly does not define SL/TP rules for this model — the STOP_LOSS/TAKE_PROFIT options above reuse this server's existing generic vocabulary rather than being sourced from the page itself.
+- Distinct from Liq_Sweep_Reversal only in the added internal-sweep (IDM) gate before FVG entry; compare backtest results between the two to see whether the extra filter helps or just reduces trade count.
+- Runs on the ICT registry engine (zones_fvg_inducement in ict_strategies.py) — see interpreted_rules.zone_source in backtest results to confirm.

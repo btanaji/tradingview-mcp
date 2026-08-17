@@ -1,0 +1,24 @@
+NAME: Consolidation_Box
+DESCRIPTION: False-breakout fade of a tight consolidation range ("box") — an aggressive breakout sweeps one side of the range, reverses back inside, and is faded on the retest of the box boundary
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 1h, 4h
+ZONES:
+- A "box" is a lookback window (default 10 candles) whose high-low range is tight relative to volatility — defined here as range <= 3x ATR(14) at the breakout bar (no numeric threshold given in source material; this is an implementation judgment call).
+- A breakout candle wicks beyond the box's high or low but closes back inside the box (false breakout).
+- The tradeable zone sits at the swept boundary, sized to the outer quarter of the box's range, for a retest entry.
+ENTRY_CONFIRMATION: [OPTIONS]
+- wick_reject: the breakout candle itself closes back inside the box by at least 50% of its own range
+- close_beyond: a subsequent candle closes beyond the zone's near edge in the trade direction
+- engulfing: the entry candle's body engulfs the prior candle's body in the trade direction
+STOP_LOSS: [OPTIONS]
+- swing_based: stop beyond the breakout candle's wick extreme (outside the box)
+- fixed_atr: stop 1.5x ATR(14) beyond the breakout candle's wick extreme
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at 2R
+- partial_1_5R: partial at 1.5R, remainder trailed toward the opposite side of the box
+- trail_only: trail behind new swing points once 1R is reached
+FILTERS:
+- Only trade boxes that are genuinely tight (range <= 3x ATR at the breakout bar) — wide/trending ranges are not consolidation and should not be faded.
+NOTES:
+- Source: algostorm.com/ict-smc-entry-models/, "Model 5: The Consolidation Box Setup". The source page frames this explicitly as a classical false-breakout/fade pattern with an ICT relabeling, and flags that distinguishing false breakouts from genuine ones "is one of trading's hardest problems" — no reliable way to know in advance which a given breakout will be. Treat this as a higher-risk counter-trend model, consistent with the source's own framing.
+- Runs on the ICT registry engine (zones_consolidation_box in ict_strategies.py) — see interpreted_rules.zone_source in backtest results to confirm.

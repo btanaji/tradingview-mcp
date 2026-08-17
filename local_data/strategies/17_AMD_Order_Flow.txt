@@ -1,0 +1,23 @@
+NAME: AMD_Order_Flow
+DESCRIPTION: Conceptual accumulation-manipulation-distribution filter that identifies which phase price is in before allowing an entry technique to fire
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 1d, 4h (accumulation range), 1h, 15m (manipulation sweep and distribution confirmation)
+PHASE_DEFINITION:
+- Accumulation: a sideways price range on the 1d/4h chart with no directional break of structure for at least 10 candles.
+- Manipulation: a liquidity sweep (per Liq_Sweep_Reversal's LIQUIDITY_POOLS rules) of one side of the accumulation range. Do not enter during this phase; it is the trap, not the trade.
+- Distribution: confirmed only once a candle closes beyond the pre-sweep minor swing point in the direction opposite the manipulation sweep (a structure shift). Entries are only permitted once distribution is confirmed.
+ENTRY_CONFIRMATION: [OPTIONS]
+- close_beyond: once distribution is confirmed (a structure shift opposite the manipulation-phase sweep, per PHASE_DEFINITION), a candle closes beyond the pre-sweep minor swing point in the distribution direction — hardcoded generic trigger, since the parser cannot reference OB_Continuation or Liq_Sweep_Reversal's rules at runtime
+- wick_reject: as an alternative, price retests the order block or level formed at the start of distribution, wicking into it and closing back out in the distribution direction
+STOP_LOSS: [OPTIONS]
+- swing_based: stop placed beyond the swing point or order block extreme that defines the start of confirmed distribution — hardcoded generic rule
+- fixed_atr: stop placed 1.5x ATR(14) beyond that same reference point
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at a fixed 2R — hardcoded generic default
+- partial_1_5R: partial close at 1.5R, remainder to breakeven and trailed by new swing structure — hardcoded generic default
+FILTERS:
+- Reject any entry attempt made during the manipulation phase itself, before distribution is confirmed, with no exceptions
+- Skip the entire setup if no accumulation range (per PHASE_DEFINITION) can be identified in the prior 10+ candles
+NOTES:
+- Conceptual umbrella for Liq_Sweep_Reversal, Liq_to_Liq_Range, Liq_FVG_Combo, and Session_Liquidity_ALN. Implement as a phase-tracking filter those files check against, not as an independent entry engine.
+- Parser compatibility: this file previously referenced OB_Continuation and Liq_Sweep_Reversal by name ("inherit_ob_continuation" / "inherit_liq_sweep_reversal" / "inherit_from_underlying_strategy"). The parser cannot resolve cross-file references, so a hardcoded, self-contained version is used above. Update this file by hand if those two files' rules change.

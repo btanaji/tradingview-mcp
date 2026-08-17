@@ -1,0 +1,23 @@
+NAME: Liq_FVG_Combo
+DESCRIPTION: Liquidity sweep reversal entered specifically at the midpoint of the fair value gap the reversal displacement creates
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 1h (sweep identification), 15m, 5m, 1m (entry)
+SETUP_DEFINITION:
+- Identify a liquidity sweep per Liq_Sweep_Reversal's LIQUIDITY_POOLS rules.
+- The reversal displacement following the sweep must leave a 3-candle fair value gap (per FVG_Rebalance's definition) in the new direction. If no such gap forms, use Liq_Sweep_Reversal instead, which also allows an order block as an alternative entry point.
+- The entry reference point is the midpoint (50%) of that fair value gap, not its far edge.
+ENTRY_CONFIRMATION: [OPTIONS]
+- midpoint_close: entry-timeframe candle closes beyond the fair value gap's midpoint in the trade direction — the primary trigger, replacing an unconfirmed resting limit order at the midpoint with a confirmed close, since the parser requires a triggering candle rather than a bare resting order
+- wick_reject: price wicks to or beyond the gap's midpoint and closes back in the trade direction on the same candle — a faster alternative to midpoint_close
+STOP_LOSS: [OPTIONS]
+- swing_based: stop placed beyond the wick extreme of the sweep candle — the primary stop
+- fixed_atr: stop placed 1.3x ATR(14) beyond the sweep candle's wick extreme — use when the sweep wick is small
+(all modes: clamp to broker/data minimum stop distance if too tight)
+TAKE_PROFIT: [OPTIONS]
+- partial_1_5R: partial close at 1.5R, remainder to breakeven and trailed toward the next liquidity pool — the primary choice, since entering at the gap midpoint gives a tighter stop that supports a larger trailed target for the same distance
+- fixed_2R: full close at a fixed 2R — the conservative alternative
+FILTERS:
+- Skip entry if the fair value gap has not yet formed — do not anticipate it before the displacement candle closes
+- Skip entry if the gap's total range is smaller than 0.3x ATR(14) for the symbol (too small relative to typical volatility to be a meaningful imbalance)
+NOTES:
+- Same base mechanism as Liq_Sweep_Reversal, with the entry point narrowed specifically to the fair value gap midpoint for a tighter stop relative to the same target.

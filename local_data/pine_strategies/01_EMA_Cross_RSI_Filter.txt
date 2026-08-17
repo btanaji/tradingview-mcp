@@ -1,0 +1,26 @@
+NAME: EMA_Cross_RSI_Filter
+SYMBOL_DEFAULT: XAUUSD
+INTERVAL: 1h
+PERIOD: 1y
+[SCRIPT]
+//@version=5
+indicator("EMA Cross + RSI Filter", overlay=true)
+ema20 = ta.ema(close, 20)
+ema50 = ta.ema(close, 50)
+rsi14 = ta.rsi(close, 14)
+plot(ema20)
+plot(ema50)
+[Trend Filter]
+ema20 > ema50
+[Buy Condition]
+ta.crossover(ema20, ema50) and rsi14 > 50
+[Sell Condition]
+ta.crossunder(ema20, ema50) and rsi14 < 50
+[Buy Exit]
+close < ema50
+[Sell Exit]
+close > ema50
+[SL]
+atr_mult: 1.5
+[TP]
+rr_multiple: 2.0

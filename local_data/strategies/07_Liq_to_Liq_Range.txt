@@ -1,0 +1,22 @@
+NAME: Liq_to_Liq_Range
+DESCRIPTION: Holds a reversal position from one HTF liquidity pool toward the opposite pool across a defined range, in trending conditions only
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 1d, 4h (range identification), 1h, 15m (entry and management)
+RANGE_DEFINITION:
+- Identify the two most significant unbroken HTF (1d/4h) swing points that define the current dealing range: the most recent major swing high (BSL) and the most recent major swing low (SSL), per Liq_Sweep_Reversal's fractal definition.
+- This file only applies when trend direction (per OB_Continuation's trend test) agrees with the direction from the swept pool toward the opposite pool. If trend is undefined, this file does not trade.
+ENTRY_CONFIRMATION: [OPTIONS]
+- close_beyond: the same rule as Liq_Sweep_Reversal — a candle closes beyond the pre-sweep swing point after one side of the range is swept — the primary trigger
+- wick_reject: after the initial sweep, price retraces into the resulting order block, wicks into it, and closes back out in the trade direction — replaces an open-ended retest wait with a defined reject-and-continue trigger
+STOP_LOSS: [OPTIONS]
+- swing_based: stop placed beyond the wick extreme of the candle that swept the range boundary — the primary stop
+- fixed_atr: stop placed 1.5x ATR(14) beyond the swept range boundary — use when the sweep wick is small relative to the size of the full HTF range being traded
+(all modes: clamp to broker/data minimum stop distance if too tight)
+TAKE_PROFIT: [OPTIONS]
+- trail_only: no fixed target, trail behind new swing points once 1R is reached, aiming for the opposite end of the range — the primary choice, since the target (the full opposite HTF pool) is generally far larger than a fixed multiple and the position should be allowed to run with the trend
+- partial_1_5R: partial close at 1.5R, remainder to breakeven and trailed toward the opposite pool — an alternative that locks in profit sooner rather than trailing the entire position from 1R
+FILTERS:
+- Skip entry if trend direction (per OB_Continuation's trend test) is undefined or the market is ranging
+- Skip entry if price has already retraced more than 50% of the distance to the opposite pool since the initial sweep — the easier portion of the move has already occurred
+NOTES:
+- Same mechanism as Liq_Sweep_Reversal, scaled to a full HTF range instead of a single swing. Only trade this file in confirmed trending conditions.

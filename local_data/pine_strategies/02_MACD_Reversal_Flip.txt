@@ -1,0 +1,15 @@
+NAME: MACD_Reversal_Flip
+SYMBOL_DEFAULT: XAUUSD
+INTERVAL: 1h
+PERIOD: 1y
+[SCRIPT]
+[macdLine, signalLine, histLine] = ta.macd(close, 12, 26, 9)
+atr14 = ta.atr(14)
+[Buy Condition]
+ta.crossover(macdLine, signalLine)
+[Sell Condition]
+ta.crossunder(macdLine, signalLine)
+[SL]
+atr_mult: 1.5
+[TP]
+signal_reversal

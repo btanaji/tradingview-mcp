@@ -1,0 +1,29 @@
+NAME: Silver_Bullet
+DESCRIPTION: Scalp entry requiring a liquidity sweep, structure shift, and fair value gap to all occur within one specific one-hour window
+SYMBOL_DEFAULT: XAUUSD
+TIMEFRAMES: 1h, 4h (bias only, no entries taken on these), 5m, 1m (entry)
+TIME_WINDOWS (EST — convert broker server time before applying):
+- Window 1: 03:00-04:00
+- Window 2: 10:00-11:00 (highest priority window if only one is traded)
+- Window 3: 14:00-15:00
+REQUIRED_SEQUENCE:
+- HTF (1h/4h) directional bias must be established before the window opens; this file does not determine direction on its own.
+- Inside the active TIME_WINDOW only, all three of the following must occur in order: (1) a liquidity sweep of a minor swing high/low, (2) a market structure shift — a candle close beyond the pre-sweep minor swing point, (3) a 3-candle fair value gap left behind in the new direction.
+- If any of the three conditions fails to occur before the window closes, no trade is taken for that window.
+ENTRY_CONFIRMATION: [OPTIONS]
+- close_beyond: enter when price retraces into the fair value gap from REQUIRED_SEQUENCE step 3 and a 1m/5m candle closes back out of the gap in the trade direction
+- wick_reject: enter when price wicks into the gap and reverses on the same candle, without waiting for a full close
+STOP_LOSS: [OPTIONS]
+- swing_based: beyond the wick extreme of the sweep candle from REQUIRED_SEQUENCE step 1
+- fixed_atr: 1.0x ATR(14) beyond the sweep candle's wick extreme (tighter than other files given the scalp nature of this strategy)
+(all modes: clamp to broker/data minimum stop distance if too tight)
+TAKE_PROFIT: [OPTIONS]
+- fixed_2R: full close at a fixed 2R — the standard choice for this strategy, translating to roughly 20 pips on forex majors or the ATR-scaled equivalent on other symbols given the tight 1.0x ATR(14) stop used here
+- trail_only: no fixed target, trail behind new 1m swing points once 1R is reached — use only if actively monitoring the trade through the remainder of the TIME_WINDOW, since this is a scalp model and letting it run unattended defeats the "in and out within the hour" design
+FILTERS:
+- Skip entry entirely outside the three TIME_WINDOWS
+- Skip entry if a scheduled news release falls inside the active TIME_WINDOW
+- Force-close any open position at the end of the TIME_WINDOW if not already closed
+- Do not take more than one trade per TIME_WINDOW per symbol
+NOTES:
+- Published win-rate figures for this model (60-75% is commonly cited in trading-education sources) are not independently audited results. Validate against your own backtest before relying on them for position sizing decisions.
