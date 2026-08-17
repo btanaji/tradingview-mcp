@@ -318,10 +318,40 @@ LIVE AGENT SYSTEM                                        [BUILT]
   actually exercise `rl_service.py`'s PPO path.
 - **LightGBM on this machine** — needs the MSVC redistributable installed
   for `ml_factor_service.py` to use it over the logistic fallback.
-- **Wiring ML/RL research output into an actual strategy** — both are
-  intentionally research-only right now (no entries/exits driven by
-  `run_alpha_factor_analysis`/`train_rl_trading_agent`); doing so would be
-  a deliberate next step, not an oversight.
+- **Wiring ML/RL research output into an actual strategy — DONE.**
+  `backtest_service.py` (the 9-built-in-strategy engine) now has two more
+  entries in `_STRATEGY_MAP`: `ml_alpha` (`_run_ml_alpha`, walk-forward
+  retrained LightGBM-or-logistic classifier from `ml_factor_service.py`)
+  and `rl_agent` (`_run_rl_agent`, walk-forward retrained Q-learning agent
+  from `rl_service.py`). Both are plain `(candles) -> list[trade]`
+  functions, so `backtest_strategy`/`compare_strategies`/
+  `walk_forward_backtest_strategy` all pick them up automatically — no
+  special-casing needed, and they inherit the shared cost/metrics layer
+  and walk-forward overfitting check like every other strategy here.
+  Point-in-time discipline: the model is retrained every `retrain_every`
+  bars on an expanding window of candles seen so far, then used frozen to
+  score the next `retrain_every` bars — it never sees the bar it's
+  scoring. `run_alpha_factor_analysis`/`train_rl_trading_agent` remain as
+  standalone diagnostic views (IC/hit-rate, RL equity curve vs.
+  buy-and-hold) of the same underlying models, now cross-referenced in
+  their docstrings/disclaimers to the wired strategies.
+  **Side fix required to verify this**: `rl_service.py` imported
+  `numpy`/`gymnasium` unconditionally at module level, so the whole MCP
+  server failed to start in any environment without the `rl` extra
+  installed (verified: `import tradingview_mcp.server` raised
+  `ModuleNotFoundError: No module named 'gymnasium'` before this fix) —
+  including this one, and including `rl_agent`'s own Q-learning path,
+  which needs neither library. Fixed by making the numpy/gymnasium/
+  `TradingEnv`/PPO block import lazily behind a try/except, guarded by a
+  `TradingEnv is not None` check at its one call site in
+  `train_rl_trading_agent`; `algo='ppo'` now returns a clear
+  `DEPENDENCY_MISSING` error instead of crashing the process, and
+  `algo='auto'`/`'qlearning'` work with no extra installed. Verified
+  end-to-end against local XAUUSD CSV data: `ml_alpha` and `rl_agent` both
+  produce real trades through `run_backtest`, `compare_strategies`, and
+  `walk_forward_backtest` (the latter reported `ROBUST` for `rl_agent` in
+  one run — same single-fold-skepticism caveat as every other case study
+  in this file applies to any one walk-forward result).
 - **OpenBB Hub-style dashboard, options-chain sandbox integration** — from
   the original substitution table, not attempted this session (lowest
   priority items on that table).

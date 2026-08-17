@@ -272,7 +272,8 @@ def run_alpha_factor_analysis(
         "feature_importances": [{"feature": f, "importance": round(v, 4)} for f, v in importance_ranked],
         "test_period": {"from": dates[split] if split < len(dates) else None, "to": dates[-1]},
         "disclaimer": (
-            "Research-layer output only — not wired into any backtest engine's entries/exits. "
+            "Diagnostic view of the classifier — for the same model driving real trades, see "
+            "backtest_strategy/walk_forward_backtest_strategy with strategy='ml_alpha'. "
             "hit_rate_pct above baseline_hit_rate_pct (the test set's actual up-move frequency) "
             "and a non-trivial |information_coefficient| are the signals to look for; a hit rate "
             "near baseline or IC near 0 means this feature set has no edge at this horizon for "

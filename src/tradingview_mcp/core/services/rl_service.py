@@ -17,8 +17,10 @@ in this codebase, the right call is graceful degradation rather than
 blocking the feature on a heavy install succeeding in every environment.
 The Q-learning path is what's actually been run and verified here.
 
-Research-layer / additive strategy source only, same caveat as
-ml_factor_service.py: not wired into any backtest engine's entries/exits.
+The Q-learning fallback here also backs backtest_service.py's 'rl_agent'
+strategy (_run_rl_agent), which walk-forward retrains the same agent and
+uses its greedy action to drive real entries/exits. train_rl_trading_agent
+below remains the standalone diagnostic view of the policy.
 """
 from __future__ import annotations
 
@@ -26,53 +28,69 @@ import random
 import statistics
 from typing import Any, Literal, Optional
 
-import numpy as np
-import gymnasium as gym
-from gymnasium import spaces
-
 from tradingview_mcp.core.services.ml_factor_service import _build_features_and_labels, _FEATURE_NAMES
 from tradingview_mcp.core.services.data_providers import get_ohlcv
 from tradingview_mcp.core.errors import ErrorCode, make_error
 
 _TRANSACTION_COST_PCT = 0.05  # per position flip, in the same % units as the reward
 
+# gymnasium/numpy back the optional PPO path only (the "rl" extra) — the
+# pure-stdlib Q-learning fallback (_QLearningAgent below) needs neither.
+# Importing them lazily here, instead of at module level, means this module
+# (and anything that imports it, including backtest_service.py's ml/rl
+# strategy wiring) stays importable when the "rl" extra isn't installed —
+# previously a bare `import gymnasium` at module level meant the whole MCP
+# server failed to start without it, even for callers who only wanted the
+# always-available Q-learning path.
+_GYM_IMPORT_ERROR: Optional[Exception] = None
+try:
+    import numpy as np
+    import gymnasium as gym
+    from gymnasium import spaces
+except ImportError as e:
+    np = gym = spaces = None  # type: ignore
+    _GYM_IMPORT_ERROR = e
 
-class TradingEnv(gym.Env):
-    """Long/flat trading environment over a fixed sequence of (features,
-    next-bar-return) pairs. Action 0 = flat, 1 = long. No short-selling
-    (matches core/portfolio.py). One episode = one full pass through the
-    provided rows."""
 
-    metadata = {"render_modes": []}
+if gym is not None:
+    class TradingEnv(gym.Env):
+        """Long/flat trading environment over a fixed sequence of (features,
+        next-bar-return) pairs. Action 0 = flat, 1 = long. No short-selling
+        (matches core/portfolio.py). One episode = one full pass through the
+        provided rows."""
 
-    def __init__(self, features: list[list[float]], step_returns_pct: list[float]):
-        super().__init__()
-        assert len(features) == len(step_returns_pct)
-        self.features = np.array(features, dtype=np.float32)
-        self.step_returns_pct = step_returns_pct
-        self.n = len(features)
-        self.action_space = spaces.Discrete(2)
-        self.observation_space = spaces.Box(
-            low=-50.0, high=50.0, shape=(self.features.shape[1],), dtype=np.float32
-        )
-        self._i = 0
-        self._position = 0
+        metadata = {"render_modes": []}
 
-    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
-        super().reset(seed=seed)
-        self._i = 0
-        self._position = 0
-        return self.features[0], {}
+        def __init__(self, features: list[list[float]], step_returns_pct: list[float]):
+            super().__init__()
+            assert len(features) == len(step_returns_pct)
+            self.features = np.array(features, dtype=np.float32)
+            self.step_returns_pct = step_returns_pct
+            self.n = len(features)
+            self.action_space = spaces.Discrete(2)
+            self.observation_space = spaces.Box(
+                low=-50.0, high=50.0, shape=(self.features.shape[1],), dtype=np.float32
+            )
+            self._i = 0
+            self._position = 0
 
-    def step(self, action: int):
-        reward = self.step_returns_pct[self._i] if action == 1 else 0.0
-        if action != self._position:
-            reward -= _TRANSACTION_COST_PCT
-        self._position = action
-        self._i += 1
-        terminated = self._i >= self.n - 1
-        obs = self.features[min(self._i, self.n - 1)]
-        return obs, reward, terminated, False, {}
+        def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+            super().reset(seed=seed)
+            self._i = 0
+            self._position = 0
+            return self.features[0], {}
+
+        def step(self, action: int):
+            reward = self.step_returns_pct[self._i] if action == 1 else 0.0
+            if action != self._position:
+                reward -= _TRANSACTION_COST_PCT
+            self._position = action
+            self._i += 1
+            terminated = self._i >= self.n - 1
+            obs = self.features[min(self._i, self.n - 1)]
+            return obs, reward, terminated, False, {}
+else:
+    TradingEnv = None  # type: ignore
 
 
 class _QLearningAgent:
@@ -140,7 +158,7 @@ def _train_qlearning(train_X, train_returns, episodes: int) -> tuple[_QLearningA
     return agent, edges
 
 
-def _try_ppo(env: TradingEnv, total_timesteps: int):
+def _try_ppo(env: "TradingEnv", total_timesteps: int):
     try:
         from stable_baselines3 import PPO
         model = PPO("MlpPolicy", env, verbose=0)
@@ -203,7 +221,14 @@ def train_rl_trading_agent(
     agent = edges = None
     ppo_model = None
 
-    if algo in ("auto", "ppo"):
+    if algo == "ppo" and TradingEnv is None:
+        return make_error(
+            ErrorCode.DEPENDENCY_MISSING,
+            f"gymnasium/numpy (the 'rl' extra) are not installed in this environment "
+            f"({_GYM_IMPORT_ERROR}) — try algo='qlearning' instead. "
+            f"pip install \".[rl-full]\" to enable PPO.",
+        )
+    if algo in ("auto", "ppo") and TradingEnv is not None:
         env = TradingEnv(train_X, train_returns)
         ppo_model = _try_ppo(env, total_timesteps=episodes * len(train_X))
         if ppo_model is not None:
@@ -269,7 +294,8 @@ def train_rl_trading_agent(
         "time_in_market_pct": time_in_market_pct,
         "test_period": {"from": dates[split] if split < len(dates) else None, "to": dates[-1]},
         "disclaimer": (
-            "Research-layer output only — not wired into any backtest engine's entries/exits. "
+            "Diagnostic view of the policy — for the same agent driving real trades, see "
+            "backtest_strategy/walk_forward_backtest_strategy with strategy='rl_agent'. "
             "One chronological train/test split, no walk-forward re-training across multiple "
             "windows — treat with the same single-fold skepticism CLAUDE.md applies everywhere "
             "else. The qlearning fallback discretizes only 4 of the 10 available features into "

@@ -1,16 +1,24 @@
 """
 Backtesting Service for tradingview-mcp — v3 (v0.7.0)
 
-Pure Python — no pandas, no numpy, no external backtesting libraries.
+Pure Python — no pandas, no numpy, no external backtesting libraries
+(ml_alpha/rl_agent below use LightGBM only if it's already installed and
+loadable, else fall back to pure-stdlib models — see their docstrings).
 
-Supported strategies (6):
-  rsi, bollinger, macd, ema_cross, supertrend, donchian
+Supported strategies (11):
+  rsi, bollinger, macd, ema_cross, supertrend, donchian, rsi_pullback,
+  keltner_breakout, triple_ema, ml_alpha, rl_agent
 
 v0.7.0 additions:
   - 1h (hourly) timeframe support
   - Full trade log with per-trade detail
   - Equity curve data points
   - Walk-forward backtesting (overfitting detection)
+
+ml_alpha/rl_agent additions:
+  - Wires ml_factor_service.py's alpha classifier and rl_service.py's
+    Q-learning agent into real entries/exits (walk-forward retrained,
+    point-in-time safe) instead of leaving them research-output-only.
 """
 from __future__ import annotations
 
@@ -25,6 +33,15 @@ from tradingview_mcp.core.services.indicators_calc import (
     calc_rsi, calc_bollinger, calc_macd, calc_ema, calc_sma, calc_atr,
     calc_supertrend, calc_donchian,
 )
+# ml_alpha/rl_agent below wire ml_factor_service.py/rl_service.py's research
+# models into real entries/exits — see their docstrings just above
+# _STRATEGY_MAP. Both imports are stdlib-safe: ml_factor_service has no heavy
+# deps, and rl_service's Q-learning primitives no longer require gymnasium/
+# numpy at import time (only its optional PPO path does — see rl_service.py).
+from tradingview_mcp.core.services.ml_factor_service import (
+    _build_features_and_labels, _LogisticRegression, _FEATURE_NAMES,
+)
+from tradingview_mcp.core.services.rl_service import _train_qlearning, _discretize
 
 _UA       = "tradingview-mcp/0.7.0 backtest-bot"
 _YF_BASE  = "https://query1.finance.yahoo.com/v8/finance/chart"
@@ -45,6 +62,8 @@ _STRATEGY_LABELS = {
     "rsi_pullback":     "RSI Pullback in Uptrend (SMA50>SMA200)",
     "keltner_breakout": "Keltner Channel Breakout (EMA20 + 2·ATR)",
     "triple_ema":       "EMA 20/50 Cross with SMA200 Trend Filter",
+    "ml_alpha":         "ML Alpha Factor Model (walk-forward retrained LightGBM/logistic)",
+    "rl_agent":         "RL Agent (walk-forward retrained Q-learning, long/flat)",
 }
 
 # Strategies that require SMA200 warmup → need ≥220 bars to produce signals
@@ -280,6 +299,122 @@ def _run_triple_ema(candles, fast_period=20, slow_period=50, trend_period=200, *
     return trades
 
 
+# ─── ML/RL-driven strategies ──────────────────────────────────────────────────
+#
+# Wires the research-layer models from ml_factor_service.py/rl_service.py
+# into actual entries/exits, closing the "research output not wired into any
+# backtest engine" gap noted in CLAUDE.md. Both are plain strategy functions
+# with the same (candles) -> list[trade] shape as every other entry in
+# _STRATEGY_MAP, so they get run_backtest/compare_strategies/
+# walk_forward_backtest "for free" — including walk-forward overfitting
+# checks, the same skepticism CLAUDE.md's case studies apply to every other
+# strategy here.
+#
+# Point-in-time discipline: the model is retrained every `retrain_every`
+# bars using only candles seen so far (expanding window) and then used,
+# frozen, to score the next `retrain_every` bars — never fit on data that
+# includes the bar being scored.
+
+_ML_MIN_TRAIN_BARS = 60
+
+
+def _run_ml_alpha(candles, horizon=5, prob_threshold=0.55, retrain_every=20, **_):
+    """ml_factor_service's technical-factor classifier (LightGBM if
+    available, else pure-stdlib logistic regression), walk-forward
+    retrained, driving entries/exits directly.
+
+    Entry: retrained model's P(forward return over `horizon` bars > 0) >=
+           prob_threshold, and flat.
+    Exit:  `horizon` bars have elapsed, or the model's P drops below 0.5
+           (bearish signal), whichever comes first.
+    """
+    feat = _build_features_and_labels(candles, horizon)
+    X_all, y_cls_all = feat["X"], feat["y_cls"]
+    offset = 50  # _build_features_and_labels warmup: X_all[k] <-> candles[k + offset]
+    n = len(X_all)
+    if n < _ML_MIN_TRAIN_BARS + 1:
+        return []
+
+    def _fit(train_X_std, train_y):
+        try:
+            import lightgbm as lgb
+            train_set = lgb.Dataset(train_X_std, label=train_y, feature_name=_FEATURE_NAMES)
+            booster = lgb.train(
+                {"objective": "binary", "verbosity": -1, "num_leaves": 15, "min_data_in_leaf": 10},
+                train_set, num_boost_round=100,
+            )
+            return lambda rows: list(booster.predict(rows))
+        except Exception:
+            clf = _LogisticRegression(len(train_X_std[0]))
+            clf.fit(train_X_std, train_y)
+            return lambda rows: clf.predict_proba(rows)
+
+    trades, position, entry_bar = [], None, None
+    predict_fn = means = stds = None
+    last_retrain = -1
+
+    for k in range(_ML_MIN_TRAIN_BARS, n):
+        if predict_fn is None or k - last_retrain >= retrain_every:
+            train_X, train_y = X_all[:k], y_cls_all[:k]
+            n_feat = len(train_X[0])
+            means = [statistics.mean(r[j] for r in train_X) for j in range(n_feat)]
+            stds = [statistics.pstdev(r[j] for r in train_X) or 1.0 for j in range(n_feat)]
+            std_train_X = [[(r[j] - means[j]) / stds[j] for j in range(n_feat)] for r in train_X]
+            predict_fn = _fit(std_train_X, train_y)
+            last_retrain = k
+
+        row = X_all[k]
+        std_row = [(row[j] - means[j]) / stds[j] for j in range(len(row))]
+        proba = predict_fn([std_row])[0]
+
+        candle_idx = k + offset
+        price, date = candles[candle_idx]["close"], candles[candle_idx]["date"]
+
+        if position is None and proba >= prob_threshold:
+            position = {"entry_date": date, "entry_price": price, "strategy": "ml_alpha"}
+            entry_bar = candle_idx
+        elif position is not None and (candle_idx - entry_bar >= horizon or proba < 0.5):
+            trades.append({**position, "exit_date": date, "exit_price": price})
+            position = None
+
+    return trades
+
+
+def _run_rl_agent(candles, retrain_every=40, episodes=50, **_):
+    """rl_service's tabular Q-learning long/flat agent (the always-available
+    fallback — PPO needs the optional 'rl' extra), walk-forward retrained,
+    driving entries/exits directly: long while the greedy policy picks
+    action 1, flat (exit) once it picks action 0.
+    """
+    feat = _build_features_and_labels(candles, horizon=1)
+    X_all, y_reg_all = feat["X"], feat["y_reg"]
+    offset = 50
+    n = len(X_all)
+    if n < _ML_MIN_TRAIN_BARS + 1:
+        return []
+
+    trades, position = [], None
+    agent = edges = None
+    last_retrain = -1
+
+    for k in range(_ML_MIN_TRAIN_BARS, n):
+        if agent is None or k - last_retrain >= retrain_every:
+            agent, edges = _train_qlearning(X_all[:k], y_reg_all[:k], episodes)
+            last_retrain = k
+
+        action = agent.act(_discretize(X_all[k], edges), greedy=True)
+        candle_idx = k + offset
+        price, date = candles[candle_idx]["close"], candles[candle_idx]["date"]
+
+        if position is None and action == 1:
+            position = {"entry_date": date, "entry_price": price, "strategy": "rl_agent"}
+        elif position is not None and action == 0:
+            trades.append({**position, "exit_date": date, "exit_price": price})
+            position = None
+
+    return trades
+
+
 _STRATEGY_MAP = {
     "rsi":              _run_rsi,
     "bollinger":        _run_bollinger,
@@ -290,6 +425,8 @@ _STRATEGY_MAP = {
     "rsi_pullback":     _run_rsi_pullback,
     "keltner_breakout": _run_keltner_breakout,
     "triple_ema":       _run_triple_ema,
+    "ml_alpha":         _run_ml_alpha,
+    "rl_agent":         _run_rl_agent,
 }
 
 

@@ -710,7 +710,11 @@ def backtest_strategy(
         symbol: Yahoo Finance symbol (AAPL, BTC-USD, THYAO.IS, ^GSPC)
         strategy: rsi | bollinger | macd | ema_cross | supertrend | donchian
                   | rsi_pullback | keltner_breakout | triple_ema
-                  (rsi_pullback and triple_ema need period >= '1y' for SMA200 warmup)
+                  | ml_alpha | rl_agent
+                  (rsi_pullback and triple_ema need period >= '1y' for SMA200 warmup;
+                   ml_alpha/rl_agent drive entries/exits from a walk-forward-retrained
+                   ml_factor_service/rl_service model — still validate with
+                   walk_forward_backtest_strategy before trusting a single-run result)
         period: '1mo', '3mo', '6mo', '1y', '2y'
         initial_capital: Starting capital in USD (default $10,000)
         commission_pct: Per-trade commission % (default 0.1%)
@@ -733,7 +737,7 @@ def compare_strategies(
     initial_capital: float = 10000.0,
     interval: str = "1d",
 ) -> dict:
-    """Run all 9 strategies (RSI, Bollinger, MACD, EMA Cross, Supertrend, Donchian, RSI Pullback, Keltner Breakout, Triple EMA) and return a ranked leaderboard.
+    """Run all 11 strategies (RSI, Bollinger, MACD, EMA Cross, Supertrend, Donchian, RSI Pullback, Keltner Breakout, Triple EMA, ML Alpha, RL Agent) and return a ranked leaderboard.
 
     Args:
         symbol: Yahoo Finance symbol (AAPL, BTC-USD, SPY…)
@@ -763,9 +767,12 @@ def walk_forward_backtest_strategy(
     Args:
         symbol: Yahoo Finance symbol (AAPL, BTC-USD, SPY…)
         strategy: rsi | bollinger | macd | ema_cross | supertrend | donchian
-                  | keltner_breakout
+                  | keltner_breakout | ml_alpha | rl_agent
                   (rsi_pullback and triple_ema not supported here — SMA200 warmup
-                   exceeds typical fold size; use run_backtest with period='2y')
+                   exceeds typical fold size; use run_backtest with period='2y'.
+                   ml_alpha/rl_agent are retrained fresh within each fold, so this
+                   is the recommended way to sanity-check them before trusting a
+                   single-run result.)
         period: '1mo', '3mo', '6mo', '1y', '2y' (recommend '2y')
         initial_capital: Starting capital per fold in USD (default $10,000)
         commission_pct: Per-trade commission % (default 0.1%)
@@ -1711,10 +1718,11 @@ def get_company_fundamentals(ticker: str, concept: str = "Revenues") -> dict:
 # ── ML alpha-factor research ────────────────────────────────────────────────────
 #
 # Qlib-style Data Handler -> Feature Engineering -> Model -> Analysis
-# workflow (research layer only — not wired into any backtest engine's
-# entries/exits). Features reuse indicators_calc.py; model is LightGBM if
-# it actually loads in this environment, else a pure-stdlib logistic
-# regression fallback — see ml_factor_service.py's module docstring.
+# workflow — diagnostic view of the same classifier backtest_strategy's
+# 'ml_alpha' strategy now trades (backtest_service.py's _run_ml_alpha).
+# Features reuse indicators_calc.py; model is LightGBM if it actually loads
+# in this environment, else a pure-stdlib logistic regression fallback —
+# see ml_factor_service.py's module docstring.
 
 @mcp.tool(annotations=ToolAnnotations(title="ML Alpha Factor Analysis", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
 def run_alpha_factor_analysis(
@@ -1730,8 +1738,9 @@ def run_alpha_factor_analysis(
     (RSI/MACD/Bollinger %B/ATR%/EMA distance/lagged returns/volatility) and
     report its out-of-sample predictive skill: hit rate vs. baseline and
     Information Coefficient (Spearman correlation between predicted score
-    and realized forward return). Research-layer output only — not wired
-    into any backtest engine's entries/exits.
+    and realized forward return). Diagnostic view only — for the same
+    model driving real entries/exits, use backtest_strategy/
+    walk_forward_backtest_strategy with strategy='ml_alpha'.
 
     Args:
         symbol: instrument symbol (see get_ohlcv for source-specific format).
@@ -1752,11 +1761,13 @@ def run_alpha_factor_analysis(
 
 # ── RL trading agent (FinRL-inspired) ───────────────────────────────────────────
 #
-# Lowest-priority, purely additive strategy source per CLAUDE.md's build
-# order. Wraps the same feature pipeline as run_alpha_factor_analysis into a
+# Wraps the same feature pipeline as run_alpha_factor_analysis into a
 # long/flat Gymnasium environment (no shorting — matches the paper
 # portfolio). PPO via Stable-Baselines3 if installed and it actually trains,
-# else a pure-stdlib tabular Q-learning fallback — see rl_service.py.
+# else a pure-stdlib tabular Q-learning fallback — see rl_service.py. The
+# Q-learning fallback also drives backtest_strategy's 'rl_agent' strategy
+# (backtest_service.py's _run_rl_agent) — this tool is the standalone
+# diagnostic view of the same policy.
 
 @mcp.tool(annotations=ToolAnnotations(title="Train RL Trading Agent", readOnlyHint=True, destructiveHint=False, openWorldHint=True))
 def train_rl_trading_agent(
@@ -1769,8 +1780,9 @@ def train_rl_trading_agent(
     algo: str = "auto",
 ) -> dict:
     """Train a long/flat RL trading agent on engineered technical features
-    and evaluate it out-of-sample against buy-and-hold. Research-layer
-    output only — not wired into any backtest engine's entries/exits.
+    and evaluate it out-of-sample against buy-and-hold. Diagnostic view
+    only — for the same agent driving real entries/exits, use
+    backtest_strategy/walk_forward_backtest_strategy with strategy='rl_agent'.
 
     Args:
         symbol: instrument symbol (see get_ohlcv for source-specific format).
